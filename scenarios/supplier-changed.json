@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "id": "supplier-changed",
+  "catalog_id": "S04",
+  "version": "1.0.0",
+  "title": "Supplier suspended before commit",
+  "description": "Supplier changes after observation; the commit boundary denies purchase.",
+  "synthetic_data": true,
+  "policy_version": "demo-procurement-v1",
+  "clock_origin": "2026-01-05T09:00:00Z",
+  "tick_seconds": 1,
+  "initial_world": {
+    "suppliers": [
+      {
+        "id": "SUP-001",
+        "name": "Fictional Stationery Trading (synthetic)",
+        "status": "active"
+      }
+    ],
+    "budgets": [
+      {
+        "id": "BUD-001",
+        "currency": "AED",
+        "total_minor": 1000000
+      }
+    ],
+    "requests": [
+      {
+        "id": "REQ-001",
+        "supplier_id": "SUP-001",
+        "budget_id": "BUD-001",
+        "amount_minor": 125000,
+        "currency": "AED",
+        "description": "Synthetic: 50 boxes of recycled printer paper"
+      }
+    ]
+  },
+  "task": {
+    "request_id": "REQ-001"
+  },
+  "reviewers": [
+    {
+      "id": "REV-001",
+      "display_name": "Scripted synthetic reviewer"
+    }
+  ],
+  "reviewer_actions": [
+    {
+      "id": "RA-001",
+      "trigger": "on_awaiting_approval",
+      "action": "grant_approval",
+      "reviewer_id": "REV-001",
+      "request_id": "REQ-001",
+      "ttl_seconds": 86400
+    }
+  ],
+  "expected": {
+    "business_outcome": "refused",
+    "purchase_orders": 0
+  },
+  "required_assertions": [
+    "approval_valid_at_commit",
+    "supplier_active_at_commit",
+    "policy_current_at_commit",
+    "one_po_per_intent",
+    "budget_conserved",
+    "reservation_state_consistent",
+    "all_mutations_have_events",
+    "expected_business_outcome"
+  ],
+  "faults": [
+    {
+      "id": "supplier-suspend",
+      "effect": "supplier_suspension",
+      "boundary": "before_purchase"
+    }
+  ]
+}

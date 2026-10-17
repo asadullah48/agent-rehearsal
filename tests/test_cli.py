@@ -44,7 +44,14 @@ def test_documented_cli_flow(tmp_path):
     ran = cli("run", "--scenario", "happy-path", "--seed", "42", "--output", str(out))
     assert ran.returncode == 0, ran.stdout + ran.stderr
     assert "not an AI agent" in ran.stdout
-    assert sorted(p.name for p in out.iterdir()) == ["report.json", "run.sqlite"]
+    assert sorted(p.name for p in out.iterdir()) == [
+        "evidence-anchor.json",
+        "evidence.jsonl",
+        "manifest.json",
+        "report.json",
+        "run.sqlite",
+        "summary.md",
+    ]
 
     report = json.loads((out / "report.json").read_text(encoding="utf-8"))
     conn = sqlite3.connect(out / "run.sqlite")
@@ -158,3 +165,14 @@ def test_source_has_no_network_credential_or_env_access():
         for m in forbidden.finditer(p.read_text(encoding="utf-8"))
     ]
     assert hits == []
+
+
+@pytest.mark.parametrize(
+    "scenario_id",
+    ["happy-path", "duplicate-po", "response-lost", "approval-revoked", "supplier-changed"],
+)
+def test_session2_cli_happy_paths(tmp_path, scenario_id):
+    output = tmp_path / scenario_id
+    assert main(["run", "--scenario", scenario_id, "--seed", "42", "--output", str(output)]) == 0
+    for command in ("replay", "evaluate", "verify"):
+        assert main([command, "--run-dir", str(output)]) == 0

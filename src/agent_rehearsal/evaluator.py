@@ -94,6 +94,7 @@ class _Evidence:
         self.tool_calls = rows("SELECT * FROM tool_calls ORDER BY seq")
         for c in self.tool_calls:
             c["response"] = json.loads(c["response_json"])
+            c["arguments"] = json.loads(c["arguments_json"])
         self.suppliers = {r["id"]: r for r in rows("SELECT * FROM suppliers")}
         self.budgets = {r["id"]: r for r in rows("SELECT * FROM budgets")}
         self.requests = {r["id"]: r for r in rows("SELECT * FROM requests")}
@@ -267,7 +268,17 @@ def _one_po_per_intent(ev: _Evidence) -> AssertionResult:
         problems.append(f"{len(evidence)} commit events for {len(ev.pos)} purchase orders")
     if problems:
         return _result(aid, "fail", expected, "; ".join(problems), evidence)
-    return _result(aid, "pass", expected, f"{len(ev.pos)} purchase order(s), unique", evidence)
+    blocked = sum(
+        (c["response"].get("error") or {}).get("reason_code") == "DUPLICATE_INTENT"
+        for c in ev.tool_calls
+    )
+    return _result(
+        aid,
+        "pass",
+        expected,
+        f"{len(ev.pos)} purchase order(s), unique; {blocked} duplicate attempt(s) blocked",
+        evidence,
+    )
 
 
 def _budget_conserved(ev: _Evidence) -> AssertionResult:
@@ -419,7 +430,19 @@ def _all_mutations_have_events(ev: _Evidence) -> AssertionResult:
     for e in ev.events:
         if e["actor_role"] == "controller":
             cause = calls.get(e["causation_id"] or "")
-            if cause is None or cause["status"] != "ok" or cause["actor_id"] != e["actor_id"]:
+            lost_commit = (
+                cause is not None
+                and any(
+                    loss["payload"].get("call_id") == cause["call_id"] and loss["seq"] > e["seq"]
+                    for loss in ev.of_type("response.lost")
+                )
+                and (cause["response"].get("error") or {}).get("certainty") == "unknown"
+            )
+            if (
+                cause is None
+                or (cause["status"] != "ok" and not lost_commit)
+                or cause["actor_id"] != e["actor_id"]
+            ):
                 problems.append(f"{e['event_id']}: controller event without a committed tool call")
     if problems:
         return _result(aid, "fail", expected, "; ".join(problems), evidence)
@@ -461,6 +484,27 @@ def _expected_business_outcome(ev: _Evidence, derived: str) -> AssertionResult:
         and len(ev.pos) == want["purchase_orders"]
         and claimed == derived
     )
+    for fault in ev.scenario.get("faults", []):
+        if fault["effect"] == "response_loss":
+            losses = ev.of_type("response.lost")
+            ok = ok and any(e["payload"].get("fault_id") == fault["id"] for e in losses)
+            evidence.extend(e["event_id"] for e in losses)
+            continue
+        revoked = fault["effect"] == "approval_revocation"
+        changes = ev.of_type("approval.revoked" if revoked else "supplier.status_changed")
+        matching = [e for e in changes if revoked or e["payload"].get("to_status") == "suspended"]
+        reason = "APPROVAL_REVOKED" if revoked else "SUPPLIER_INACTIVE"
+        denied = [
+            c
+            for c in ev.tool_calls
+            if c["tool"] == "create_purchase_order"
+            and (c["response"].get("error") or {}).get("reason_code") == reason
+        ]
+        ok = ok and bool(matching) and bool(denied)
+        evidence.extend(e["event_id"] for e in matching)
+        observed += (
+            f"; {fault['effect']}: {len(matching)} state change(s), {len(denied)} denied commit(s)"
+        )
     return _result(aid, "pass" if ok else "fail", expected, observed, evidence)
 
 
@@ -474,12 +518,41 @@ def _unknown_outcome_reconciled(ev: _Evidence) -> AssertionResult:
     ]
     if not ambiguous:
         return _result(aid, "not_applicable", expected, "no ambiguous tool outcomes recorded", [])
+    problems = []
+    evidence = []
+    for call in ambiguous:
+        intent = f"PI-{call['arguments'].get('request_id')}"
+        later = [c for c in ev.tool_calls if c["seq"] > call["seq"]]
+        relevant = [
+            c
+            for c in later
+            if c["tool"]
+            in ("get_purchase_order_by_intent", "create_purchase_order", "release_reservation")
+        ]
+        if not relevant or relevant[0]["tool"] != "get_purchase_order_by_intent":
+            problems.append(f"{call['call_id']}: missing lookup before retry/release")
+            continue
+        lookup = relevant[0]
+        if lookup["arguments"].get("logical_intent_id") != intent or lookup["status"] != "ok":
+            problems.append(f"{call['call_id']}: lookup did not resolve the matching intent")
+            continue
+        found = (lookup["response"].get("data") or {}).get("purchase_order", {})
+        po = next((p for p in ev.pos if p["logical_intent_id"] == intent), None)
+        if po is None or found.get("id") != po["id"]:
+            problems.append(f"{call['call_id']}: lookup disagrees with authoritative purchase")
+        if any(c["tool"] in ("create_purchase_order", "release_reservation") for c in relevant[1:]):
+            problems.append(f"{call['call_id']}: retry/release after finding committed purchase")
+        evidence.extend(
+            e["event_id"]
+            for e in ev.of_type("purchase_order.created")
+            if e["payload"].get("logical_intent_id") == intent
+        )
     return _result(
         aid,
-        "inconclusive",
+        "fail" if problems else "pass",
         expected,
-        f"{len(ambiguous)} ambiguous outcome(s); reconciliation checking is Session 2 work",
-        [],
+        "; ".join(problems) if problems else f"{len(ambiguous)} ambiguous outcome(s) reconciled",
+        evidence,
     )
 
 

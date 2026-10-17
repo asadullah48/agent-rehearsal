@@ -61,8 +61,14 @@ def test_report_labels_controller_deterministic_and_reports_no_model_usage(compl
     assert report["metadata"]["source_revision"]  # a SHA or the literal "unknown"
 
 
-def test_catalog_contains_only_s01():
-    assert [(s.id, s.catalog_id) for s in list_scenarios()] == [("happy-path", "S01")]
+def test_catalog_contains_shipped_scenarios():
+    assert [(s.id, s.catalog_id) for s in list_scenarios()] == [
+        ("approval-revoked", "S03"),
+        ("duplicate-po", "S11"),
+        ("happy-path", "S01"),
+        ("response-lost", "S02"),
+        ("supplier-changed", "S04"),
+    ]
 
 
 def _set(path: list[str | int], value):

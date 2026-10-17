@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from agent_rehearsal.canonical import canonical_json
 from agent_rehearsal.controller import (
     ADAPTER,
     AwaitReview,
@@ -22,12 +23,13 @@ from agent_rehearsal.controller import (
     ToolProposal,
 )
 from agent_rehearsal.evaluator import Evaluation, evaluate_run
-from agent_rehearsal.models import Actor
+from agent_rehearsal.evidence import export_bundle
+from agent_rehearsal.models import Actor, ToolError
 from agent_rehearsal.policy import KNOWN_POLICIES
-from agent_rehearsal.privileged import ReviewerConsole
+from agent_rehearsal.privileged import ReviewerConsole, ScenarioConsole
 from agent_rehearsal.report import build_report, write_report
 from agent_rehearsal.scenarios import Scenario
-from agent_rehearsal.store import Store
+from agent_rehearsal.store import HARNESS, Store
 from agent_rehearsal.tools import ToolGateway
 
 CONTROLLER_ACTOR = Actor(actor_id="CTRL-REF", role="controller")
@@ -79,6 +81,7 @@ def execute_run(scenario: Scenario, seed: int, output: Path) -> RunResult:
     evaluation = evaluate_run(output / DB_NAME)
     report = build_report(output / DB_NAME, evaluation, wall_clock_ms=wall_ms)
     write_report(output / REPORT_NAME, report)
+    export_bundle(output, report)
     return RunResult(output, evaluation, report)
 
 
@@ -92,7 +95,10 @@ def _drive(
     }
     pending = list(scenario.reviewer_actions)
     controller = ReferenceController(
-        request_id=scenario.task.request_id, seed=seed, max_attempts_per_operation=max_attempts
+        request_id=scenario.task.request_id,
+        seed=seed,
+        max_attempts_per_operation=max_attempts,
+        duplicate_po_attempt=scenario.duplicate_po_attempt,
     )
     journaled = 0
 
@@ -103,6 +109,7 @@ def _drive(
         journaled = len(controller.transitions)
 
     proposals = 0
+    purchase_occurrence = 0
     drive = controller.drive()
     reply = None
     try:
@@ -128,7 +135,77 @@ def _drive(
                         limit_reached="max_proposed_actions",
                     )
                     return
+                if decision.tool == "create_purchase_order":
+                    purchase_occurrence += 1
+                    for fault in scenario.faults:
+                        if fault.boundary != "before_purchase":
+                            continue
+                        if fault.occurrence != purchase_occurrence:
+                            continue
+                        if store.rows(
+                            "SELECT * FROM fault_firings WHERE fault_id = ?", (fault.id,)
+                        ):
+                            continue
+                        req = store.rows(
+                            "SELECT * FROM requests WHERE id = ?", (scenario.task.request_id,)
+                        )[0]
+                        if fault.effect == "approval_revocation":
+                            approval = store.rows(
+                                "SELECT * FROM approvals WHERE id = ?",
+                                (decision.arguments["approval_id"],),
+                            )[0]
+                            event_id = consoles[approval["reviewer_id"]].revoke_approval(
+                                approval["id"]
+                            )
+                        else:
+                            event_id = ScenarioConsole(store, HARNESS).set_supplier_status(
+                                req["supplier_id"], "suspended"
+                            )
+                        with store.transaction() as tx:
+                            tx.execute(
+                                "INSERT INTO fault_firings VALUES (?, ?, ?, ?)",
+                                (fault.id, purchase_occurrence, fault.effect, event_id),
+                            )
                 reply = gateway.call(decision.tool, decision.arguments)
+                if decision.tool == "create_purchase_order" and reply.status == "ok":
+                    for fault in scenario.faults:
+                        if (
+                            fault.boundary != "after_purchase_commit"
+                            or fault.occurrence != purchase_occurrence
+                        ):
+                            continue
+                        if store.rows(
+                            "SELECT * FROM fault_firings WHERE fault_id = ?", (fault.id,)
+                        ):
+                            continue
+                        reply = reply.model_copy(
+                            update={
+                                "status": "error",
+                                "data": None,
+                                "error": ToolError(
+                                    code="OUTCOME_UNKNOWN",
+                                    reason_code="OUTCOME_UNKNOWN",
+                                    message="purchase response lost after commit",
+                                    certainty="unknown",
+                                ),
+                                "event_ids": [],
+                            }
+                        )
+                        with store.transaction() as tx:
+                            event_id = tx.add_event(
+                                HARNESS,
+                                "response.lost",
+                                {"call_id": reply.call_id, "fault_id": fault.id},
+                            )
+                            tx.execute(
+                                "INSERT INTO fault_firings VALUES (?, ?, ?, ?)",
+                                (fault.id, purchase_occurrence, fault.effect, event_id),
+                            )
+                            tx.execute(
+                                "UPDATE tool_calls SET status = 'error', response_json = ? "
+                                "WHERE call_id = ?",
+                                (canonical_json(reply.model_dump(mode="json")), reply.call_id),
+                            )
             elif isinstance(decision, AwaitReview):
                 due = [
                     a
