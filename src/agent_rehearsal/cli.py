@@ -8,19 +8,23 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 import sys
 from pathlib import Path
 
+from agent_rehearsal.adapters import load_scripted
 from agent_rehearsal.controller import ADAPTER
 from agent_rehearsal.evaluator import evaluate_run
-from agent_rehearsal.evidence import verify_ledger
+from agent_rehearsal.evidence import EXPORT_POINTS, verify_ledger
 from agent_rehearsal.playback import load_playback, render, verify_against_report
+from agent_rehearsal.recovery import CRASH_POINTS
 from agent_rehearsal.report import load_report
 from agent_rehearsal.runner import (
     DB_NAME,
     REPORT_NAME,
     OutputDirectoryNotEmpty,
     execute_run,
+    resume_run,
 )
 from agent_rehearsal.scenarios import (
     DEFAULT_SCENARIOS_DIR,
@@ -60,6 +64,12 @@ def cmd_scenarios_list(args: argparse.Namespace) -> int:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
+    if (args.adapter == "scripted") != (args.script is not None):
+        return _err("--adapter scripted requires --script; reference does not accept --script")
+    try:
+        controller = load_scripted(args.script) if args.script is not None else None
+    except (OSError, ValueError) as exc:
+        return _err(str(exc))
     try:
         scenario = load_scenario(args.scenario, args.scenarios_dir)  # before any world exists
     except ScenarioError as exc:
@@ -68,11 +78,18 @@ def cmd_run(args: argparse.Namespace) -> int:
     try:
         if output.exists() and (not output.is_dir() or any(output.iterdir())):
             raise OutputDirectoryNotEmpty(f"refusing to write into nonempty path: {output}")
-        result = execute_run(scenario, args.seed, output)
+        result = execute_run(
+            scenario,
+            args.seed,
+            output,
+            crash_at=args.crash_at,
+            crash_during_export=args.crash_during_export,
+            controller=controller,
+        )
     except OutputDirectoryNotEmpty as exc:
         return _err(str(exc))
     report = result.report
-    print(LABEL)
+    print(f"Controller: {report['adapter']['label']}")
     print(f"Scenario: {scenario.id} ({scenario.catalog_id}) seed={args.seed}")
     print(f"Run directory: {output}")
     print(f"Execution status: {report['execution_status']}")
@@ -88,6 +105,17 @@ def cmd_run(args: argparse.Namespace) -> int:
     if report["execution_status"] == "error":
         return EXIT_INVALID
     return VERDICT_EXIT[report["verdict"]]
+
+
+def cmd_resume(args: argparse.Namespace) -> int:
+    try:
+        result = resume_run(args.run_dir, crash_during_export=args.crash_during_export)
+    except (OSError, ValueError, KeyError, sqlite3.Error) as exc:
+        return _err(str(exc))
+    print(f"Controller: {result.report['adapter']['label']}")
+    print(f"Business outcome: {result.report['business_outcome']}")
+    print(f"Evaluation verdict: {result.evaluation.verdict}")
+    return VERDICT_EXIT[result.evaluation.verdict]
 
 
 def cmd_replay(args: argparse.Namespace) -> int:
@@ -162,7 +190,11 @@ def cmd_verify(args: argparse.Namespace) -> int:
         ok, index, reason = verify_ledger(args.run_dir / "evidence.jsonl", head, count)
     except (OSError, ValueError, KeyError, TypeError) as exc:
         return _err(str(exc))
-    print(f"{'PASS' if ok else 'FAIL'}: {reason}; zero-based record index {index}")
+    if ok:
+        head = str(index - 1) if index else "none"
+        print(f"PASS: {index} records verified (head index {head})")
+    else:
+        print(f"FAIL: {reason}; zero-based record index {index}")
     print("Tamper-evident (not tamper-proof); retain the final digest separately.")
     return EXIT_PASS if ok else EXIT_FAIL
 
@@ -186,7 +218,15 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--seed", type=int, required=True)
     run.add_argument("--output", type=Path, required=True)
     run.add_argument("--scenarios-dir", type=Path, default=DEFAULT_SCENARIOS_DIR)
+    run.add_argument("--crash-at", choices=CRASH_POINTS)
+    run.add_argument("--crash-during-export", choices=EXPORT_POINTS)
+    run.add_argument("--adapter", choices=("reference", "scripted"), default="reference")
+    run.add_argument("--script", type=Path, help="offline JSON decision script")
     run.set_defaults(func=cmd_run)
+    resume = sub.add_parser("resume", help="recover an interrupted local run")
+    resume.add_argument("--run-dir", type=Path, required=True)
+    resume.add_argument("--crash-during-export", choices=EXPORT_POINTS)
+    resume.set_defaults(func=cmd_resume)
 
     rep = sub.add_parser("replay", help="recorded playback of a finished run")
     rep.add_argument("--run-dir", type=Path, required=True)

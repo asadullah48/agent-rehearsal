@@ -26,6 +26,12 @@ if TYPE_CHECKING:
 
 SCHEMA = """
 CREATE TABLE run_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE decision_journal (
+    step INTEGER PRIMARY KEY,
+    decision_json TEXT NOT NULL,
+    cursor INTEGER NOT NULL,
+    reply_json TEXT
+);
 CREATE TABLE evidence_chain (
     record_index INTEGER PRIMARY KEY,
     record_json TEXT NOT NULL
@@ -399,6 +405,12 @@ class Store:
             raise FileNotFoundError(f"run database not found: {path}")
         uri = path.resolve().as_uri() + "?mode=ro"
         return cls(cls._connect(uri, uri=True), path)
+
+    @classmethod
+    def open_existing(cls, path: Path) -> Store:
+        if not path.is_file():
+            raise FileNotFoundError(f"run database not found: {path}")
+        return cls(cls._connect(path.resolve().as_uri() + "?mode=rw", uri=True), path)
 
     # --- access ----------------------------------------------------------------
 

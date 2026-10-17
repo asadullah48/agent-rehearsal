@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "decisions": [
+    {"kind": "tool", "tool": "get_request", "arguments": {"request_id": "REQ-001"}},
+    {"kind": "tool", "tool": "get_supplier", "arguments": {"supplier_id": "SUP-001"}},
+    {"kind": "tool", "tool": "get_budget", "arguments": {"budget_id": "BUD-001"}, "state_after": "VALIDATED"},
+    {"kind": "tool", "tool": "reserve_budget", "arguments": {"request_id": "REQ-001", "amount_minor": 125000, "operation_key": "script-reserve-0001"}, "state_after": "RESERVED"},
+    {"kind": "tool", "tool": "get_approval", "arguments": {"request_id": "REQ-001"}, "state_after": "AWAITING_APPROVAL"},
+    {"kind": "review", "request_id": "REQ-001"},
+    {"kind": "tool", "tool": "get_approval", "arguments": {"request_id": "REQ-001"}, "state_after": "READY_TO_COMMIT"},
+    {"kind": "tool", "tool": "get_supplier", "arguments": {"supplier_id": "SUP-001"}},
+    {"kind": "tool", "tool": "create_purchase_order", "arguments": {"request_id": "REQ-001", "reservation_id": "RES-0001", "approval_id": "APR-0001", "operation_key": "script-purchase-0001"}},
+    {"kind": "tool", "tool": "create_purchase_order", "arguments": {"request_id": "REQ-001", "reservation_id": "RES-0001", "approval_id": "APR-0001", "operation_key": "script-bad-retry-0001"}},
+    {"kind": "tool", "tool": "release_reservation", "arguments": {"reservation_id": "RES-0001", "operation_key": "script-release-0001"}}
+  ],
+  "final_state": "REFUSED"
+}

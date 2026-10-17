@@ -4,10 +4,10 @@ An offline simulator and independent evaluator that checks whether a tool-using
 controller preserves **approval**, **idempotency** and **budget** invariants in a
 fictional procurement workflow.
 
-> **Status: Session 2 (offline disruptions and evidence).** The only controller is a
-> **deterministic reference controller**: a fixed, seeded state machine. It is
-> **not an AI agent** and makes **no model calls**. Nothing in this repository
-> shows how any live LLM agent behaves.
+> **Status: Session 3 (local recovery, atomic export, offline adapter boundary).**
+> Two offline controllers ship: a **deterministic reference controller** and a
+> **scripted offline decision replay**. Both make **zero model calls**. Nothing
+> here demonstrates the behavior of a live LLM agent.
 
 ## Synthetic data notice
 
@@ -84,13 +84,14 @@ Exit codes: `0` all required assertions pass · `1` evaluation failed · `2` inv
 input, harness error, inconclusive evaluation, or evidence that disagrees with the
 report. For `replay`, `0` means the playback matched the report.
 
-### Three execution modes
+### Execution modes
 
 | Mode | How | Guarantee |
 | --- | --- | --- |
 | Recorded playback | `replay` | Reads saved evidence only |
-| Deterministic rerun | `run` again with the same scenario and seed | Equal *canonical semantic trace* (tested) |
-| Live rerun | not available | No live adapter exists in Session 1 |
+| Deterministic rerun | `run` with the same scenario and seed | Equal canonical semantic trace |
+| Local recovery | `resume` | Reconstructs controller state from durable decisions/replies; continues the same SQLite world |
+| Live rerun | unavailable | No live model adapter ships |
 
 The canonical semantic trace is `report.json` with these fields removed:
 `metadata.run_id`, `metadata.source_revision`, `metadata.python_version`,
@@ -101,29 +102,117 @@ test checks that.
 
 ## Design notes
 
-### Event chain verification (Session 2)
+### Crash and resume (PowerShell)
 
-Every event appends a SHA-256 chain record inside its SQLite transaction.
-Completed runs export `evidence.jsonl`, `evidence-anchor.json`, `summary.md`,
-and `manifest.json` alongside the database and report. Each record includes
-its zero-based index, full event, previous record hash, and current record hash.
+Use fresh output directories; `run` refuses to overwrite previous evidence.
+The crash command deliberately exits **86**, bypasses Python cleanup and writes
+no completed bundle. Run the next command to recover it:
 
-```bash
-python -m agent_rehearsal verify --run-dir .rehearsal/demo/happy
-python -m agent_rehearsal verify --run-dir .rehearsal/demo/happy --expected-head <retained-sha256> --expected-count <retained-count>
+```powershell
+.\.venv\Scripts\python.exe -m agent_rehearsal run --scenario happy-path --seed 42 --output .rehearsal/session3-crash-demo --crash-at after-purchase-commit
+.\.venv\Scripts\python.exe -m agent_rehearsal resume --run-dir .rehearsal/session3-crash-demo
+.\.venv\Scripts\python.exe -m agent_rehearsal verify --run-dir .rehearsal/session3-crash-demo
+.\.venv\Scripts\python.exe -m agent_rehearsal evaluate --run-dir .rehearsal/session3-crash-demo
+```
+
+`--crash-at` accepts `before-reservation`, `after-reservation`, `after-approval`,
+`before-purchase`, `after-purchase-commit`, and `after-purchase-response`.
+Post-commit injection fires only after a successful purchase transaction. No
+wall-clock sleeps control these boundaries.
+
+The durable decision/reply journal reconstructs the generator without repeating
+acknowledged actions. Pending reservations/reviewer actions reuse persisted
+results. Pending purchases reconcile by authoritative intent lookup before any
+retry; an undelivered committed purchase becomes an ambiguous response with
+recovery evidence. The runner performs reconciliation even for the scripted
+controller. The reference controller also checks its own ambiguous observation.
+An unresolved lookup stops recovery for manual review. A deliberately bad
+controller can still propose a later unsafe action; the gateway and independent
+evaluator remain authoritative.
+
+Resume validates the SQLite event chain against actual event rows, and checks
+`evidence.jsonl` is an unchanged prefix. The mirror may lag a transaction interrupted
+before its next safe point; resume regenerates that valid missing tail. Changed
+records are rejected. Same scenario, seed, adapter decisions and crash point
+produce the same semantic trace. A recovered trace can contain reconciliation
+calls absent from an uninterrupted trace; business outcomes are compared separately.
+
+### Atomic export and interrupted export recovery
+
+Completed bundles contain `run.sqlite`, `report.json`, `evidence.jsonl`,
+`evidence-anchor.json`, `summary.md`, and `manifest.json`. Export stages a complete
+sibling directory, flushes its files, then publishes the directory generation.
+It never publishes the four bundle documents one at a time.
+
+The directory swap can briefly leave the public run path absent. A sibling
+`<run>.export-backup` preserves the previous state; `resume --run-dir <run>` restores
+it automatically and finishes export. A partial `<run>.export-stage` is discarded
+within validated generated paths. An interrupted first export leaves no published
+bundle; an interrupted replacement leaves the old complete bundle, no public path,
+or the new complete bundle. The database and ledger remain recoverable.
+
+For an export-interruption exercise (expected initial exit 86):
+
+```powershell
+.\.venv\Scripts\python.exe -m agent_rehearsal run --scenario response-lost --seed 42 --output .rehearsal/export-demo --crash-during-export after-backup
+.\.venv\Scripts\python.exe -m agent_rehearsal resume --run-dir .rehearsal/export-demo
+```
+
+`--crash-during-export` is available on `run` and `resume`. Boundaries are `report`,
+`summary`, `anchor`, `manifest`, `before-publish`, `after-backup`, and `after-publish`.
+A completed run is exported again without executing its business workflow.
+Keep one writer per run and close external SQLite handles before export on Windows.
+
+### Event chain verification
+
+Every event appends a SHA-256 chain record inside its SQLite transaction. Each
+record includes its zero-based index, full event, previous hash, and current hash.
+
+```powershell
+.\.venv\Scripts\python.exe -m agent_rehearsal verify --run-dir .rehearsal/session3-crash-demo
+# Optional: supply a separately retained digest and count:
+.\.venv\Scripts\python.exe -m agent_rehearsal verify --run-dir .rehearsal/session3-crash-demo --expected-head <retained-sha256> --expected-count <retained-count>
 ```
 
 `verify` returns 0 for a matching chain, 1 for tampering, and 2 for invalid input.
-Failures identify the first affected zero-based record index; a changed retained
-digest is detected at the end of an otherwise internally valid chain. The command
-checks the exported event ledger, not database/report consistency or manifest hashes.
-File hashes in the manifest can be checked independently.
+For six events, success reads `PASS: 6 records verified (head index 5)`; an empty
+chain reports `head index none`. Failures name the first bad zero-based record
+index. A rewritten internally consistent chain fails at its final digest check
+when compared with a retained trusted digest.
 
-This is **tamper-evident (not tamper-proof)**. Retain the final digest and count
-outside the writable bundle. Whoever controls the files can rewrite the entire
-chain, manifest and local anchor. Local-anchor verification alone detects edits
-and corruption, but cannot establish provenance or external truth. Old Session 1
-runs have no chain; rerun a scenario to generate a Session 2 evidence bundle.
+This is **tamper-evident (not tamper-proof)**. Anyone controlling the files can
+rewrite the whole chain, local anchor, manifest and recovery metadata. Retain a
+trusted digest outside the bundle. `verify` checks the exported ledger, while
+`evaluate` and `replay` perform separate database/report checks. Manifest file
+hashes can be checked independently. None of these checks proves external truth.
+
+### Offline adapter boundary
+
+```powershell
+.\.venv\Scripts\python.exe -m agent_rehearsal run --scenario approval-revoked --seed 42 --adapter scripted --script .\scripts\revoked-approval.json --output .rehearsal/scripted-demo
+```
+
+The shipped script deliberately retries a purchase after the gateway reports a
+revoked approval. Both attempts are blocked, no PO is committed, and the reservation
+is released. The scenario passes because the expected refusal is enforced. A test
+changes the script's terminal claim to fulfilled and proves evaluation fails.
+The script is fixed synthetic decision data, not evidence of model reasoning.
+
+`adapters.Controller` defines metadata, persisted configuration, state/transitions,
+and a `drive()` decision stream. It yields typed tool proposals or a review request,
+receives recorded `ToolResult` observations, and returns a terminal claim. Neither
+shipped controller receives a store or privileged reviewer console. Script schemas
+reject unknown fields and invalid transitions before creating the world; tool
+arguments still pass through the existing gateway. Script decisions and their hash
+are persisted, so resume does not need the original JSON file.
+
+A future live model adapter can implement the same protocol behind an explicit
+opt-in entry point, producing typed proposals and recording actual model identity,
+usage and limits. Its SDK/configuration must load only on that opt-in path; offline
+runs and tests must remain independent. No live adapter, SDK, keys, network path,
+or hard spend guarantee is implemented. This Python protocol is an interface, not
+a sandbox for untrusted adapter code. Nondeterministic adapters would need their
+own replay/version contract before recovery could be claimed.
 
 - **Trusted identity.** The harness binds each gateway or console to an `Actor`.
   Tool arguments are strict schemas that reject unknown fields, so a
@@ -159,7 +248,7 @@ python -m pytest
 python -m ruff check . && python -m ruff format --check .
 ```
 
-Session 2 result: **114 tests passed** (baseline: 87). There are **five scenario
+Session 3 result: **160 tests passed** (baseline: 114). There are **five scenario
 files**, counted separately from tests:
 
 | Scenario | Expected behavior |
@@ -188,21 +277,25 @@ connections and `.env` reads. No runtime or development dependencies were added.
 ## Limits / non-goals
 
 - **No live AI agent.** Passing these scenarios shows only that this harness and its
-  deterministic controller behave as specified on the shipped synthetic fixtures. It says
+  two offline controllers behave as specified on the shipped synthetic fixtures. It says
   nothing about how an LLM agent would behave, and it does not show that unseen
   cases are safe.
-- **Bounded Session 2 scope.** The three core disruptions and local evidence
+- **Bounded Session 3 scope.** The three core disruptions and local evidence
   bundle work. There is no frontend, API server, MCP adapter, decision forks,
   authentication, billing, deployment or external integration. Expiry, policy
-  changes, failed compensation and process-crash scenarios remain backlog.
-- **Not durable execution.** Runs are synchronous and in-process. Process
-  restart/resume is not implemented or tested. Playback reads saved evidence only.
+  changes, failed compensation remain backlog. Named local process-crash recovery is covered below.
+- **Bounded local recovery.** Real subprocess termination is tested at six workflow
+  boundaries and seven export boundaries. This is not a guarantee against arbitrary
+  instruction-level crashes, disk corruption, power loss or concurrent writers.
+  Recovery requires this version's compatible adapter and persisted journal; there
+  is no general migration, distributed durability or external-side-effect recovery.
+  Paused reviewer waits remain paused. Playback still only reads evidence.
 - **Local guarantees only.** Atomicity and idempotency rely on one local SQLite
   file. Real connectors would need to declare their own guarantees.
 - **Evidence integrity.** The event chain is tamper-evident (not tamper-proof)
   relative to a separately retained digest. A local anchor and manifest are writable
   by the same file owner. `verify` checks only the exported ledger. Bundle export
-  happens at run completion; interrupted export/resume is not implemented.
+  publishes whole directory generations; interrupted exports can be resumed.
 - **English only.** Arabic is planned, not supported. It will come only after a
   competent reviewer verifies content and behaviour.
 - **No real purchasing, payments, legal interpretation, or government system
@@ -210,4 +303,4 @@ connections and `.env` reads. No runtime or development dependencies were added.
 - **License.** No license has been chosen yet. All rights are reserved by the
   owner until one is added.
 
-See `docs/ADR-001-OFFLINE-KERNEL.md` and `docs/SESSION-2-CHECKPOINT.md`.
+See `docs/ADR-001-OFFLINE-KERNEL.md` and `docs/SESSION-3-CHECKPOINT.md`.
