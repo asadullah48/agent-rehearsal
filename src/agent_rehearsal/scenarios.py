@@ -107,7 +107,7 @@ class Expected(Strict):
 
 class Fault(Strict):
     id: Slug
-    effect: Literal["supplier_suspension", "response_loss"]
+    effect: Literal["supplier_suspension", "response_loss", "approval_revocation"]
     boundary: Literal["before_purchase", "after_purchase_commit"]
     occurrence: int = Field(default=1, ge=1)
     max_firings: Literal[1] = 1

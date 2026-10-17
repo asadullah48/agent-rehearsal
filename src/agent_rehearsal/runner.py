@@ -147,9 +147,18 @@ def _drive(
                         req = store.rows(
                             "SELECT * FROM requests WHERE id = ?", (scenario.task.request_id,)
                         )[0]
-                        event_id = ScenarioConsole(store, HARNESS).set_supplier_status(
-                            req["supplier_id"], "suspended"
-                        )
+                        if fault.effect == "approval_revocation":
+                            approval = store.rows(
+                                "SELECT * FROM approvals WHERE id = ?",
+                                (decision.arguments["approval_id"],),
+                            )[0]
+                            event_id = consoles[approval["reviewer_id"]].revoke_approval(
+                                approval["id"]
+                            )
+                        else:
+                            event_id = ScenarioConsole(store, HARNESS).set_supplier_status(
+                                req["supplier_id"], "suspended"
+                            )
                         with store.transaction() as tx:
                             tx.execute(
                                 "INSERT INTO fault_firings VALUES (?, ?, ?, ?)",

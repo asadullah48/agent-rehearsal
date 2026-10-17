@@ -62,3 +62,21 @@ def test_response_lost_missing_lookup_fails(tmp_path):
         if a.id == "unknown_outcome_reconciled"
     )
     assert check.status == "fail"
+
+
+def test_approval_revoked_refuses_and_releases(tmp_path):
+    result = execute_run(load_scenario("approval-revoked"), 42, tmp_path / "revoked")
+    assert result.evaluation.verdict == "pass"
+    assert result.report["business_outcome"] == "refused"
+    check = next(a for a in result.evaluation.assertions if a.id == "expected_business_outcome")
+    revocation = next(e for e in result.report["events"] if e["event_type"] == "approval.revoked")
+    assert revocation["event_id"] in check.evidence_event_ids
+    assert any(e["event_type"] == "reservation.released" for e in result.report["events"])
+
+
+def test_missing_revocation_is_detected(tmp_path, monkeypatch):
+    from agent_rehearsal.privileged import ReviewerConsole
+
+    monkeypatch.setattr(ReviewerConsole, "revoke_approval", lambda *args: "missing-event")
+    result = execute_run(load_scenario("approval-revoked"), 42, tmp_path / "missing")
+    assert result.evaluation.verdict == "fail"

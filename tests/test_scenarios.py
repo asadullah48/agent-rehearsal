@@ -63,6 +63,7 @@ def test_report_labels_controller_deterministic_and_reports_no_model_usage(compl
 
 def test_catalog_contains_shipped_scenarios():
     assert [(s.id, s.catalog_id) for s in list_scenarios()] == [
+        ("approval-revoked", "S03"),
         ("duplicate-po", "S11"),
         ("happy-path", "S01"),
         ("response-lost", "S02"),

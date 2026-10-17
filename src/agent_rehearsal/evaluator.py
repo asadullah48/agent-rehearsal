@@ -490,13 +490,15 @@ def _expected_business_outcome(ev: _Evidence, derived: str) -> AssertionResult:
             ok = ok and any(e["payload"].get("fault_id") == fault["id"] for e in losses)
             evidence.extend(e["event_id"] for e in losses)
             continue
-        changes = ev.of_type("supplier.status_changed")
-        matching = [e for e in changes if e["payload"].get("to_status") == "suspended"]
+        revoked = fault["effect"] == "approval_revocation"
+        changes = ev.of_type("approval.revoked" if revoked else "supplier.status_changed")
+        matching = [e for e in changes if revoked or e["payload"].get("to_status") == "suspended"]
+        reason = "APPROVAL_REVOKED" if revoked else "SUPPLIER_INACTIVE"
         denied = [
             c
             for c in ev.tool_calls
             if c["tool"] == "create_purchase_order"
-            and (c["response"].get("error") or {}).get("reason_code") == "SUPPLIER_INACTIVE"
+            and (c["response"].get("error") or {}).get("reason_code") == reason
         ]
         ok = ok and bool(matching) and bool(denied)
         evidence.extend(e["event_id"] for e in matching)
