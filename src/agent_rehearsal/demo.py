@@ -7,8 +7,20 @@ import json
 from html import escape
 from pathlib import Path
 
+from agent_rehearsal.adapters import load_scripted
 from agent_rehearsal.runner import execute_run, prepare_output_dir
-from agent_rehearsal.scenarios import list_scenarios
+from agent_rehearsal.scenarios import DEFAULT_SCENARIOS_DIR, list_scenarios, load_scenario
+
+SCRIPTED_LABEL = "scripted offline agent (replayed decisions, no model calls)"
+
+
+def controller_label(report: dict) -> str:
+    return (
+        SCRIPTED_LABEL
+        if report["adapter"]["id"] == "scripted-offline"
+        else report["adapter"]["label"]
+    )
+
 
 STYLE = """*{box-sizing:border-box}body{margin:auto;padding:16px;max-width:960px;
 font:16px/1.6 system-ui;background:#101827;color:#ecf2ff;overflow-wrap:anywhere}
@@ -36,13 +48,25 @@ def generate_demo(output: Path) -> None:
     """Refuse overwrite; keep complete original bundles beside their static views."""
     prepare_output_dir(output)
     links = []
-    for scenario in list_scenarios():
-        result = execute_run(scenario, 42, output / "runs" / scenario.id)
+    cases = [(s.id, s, None) for s in list_scenarios()]
+    for slug, script in (
+        ("false-success", "false-success.json"),
+        ("stale-approval", "revoked-approval.json"),
+    ):
+        cases.append(
+            (
+                slug,
+                load_scenario("approval-revoked"),
+                load_scripted(DEFAULT_SCENARIOS_DIR.parent / "scripts" / script),
+            )
+        )
+    for slug, scenario, controller in cases:
+        result = execute_run(scenario, 42, output / "runs" / slug, controller=controller)
         report = result.report
-        links.append(f'<a href="{scenario.id}.html">{escape(scenario.title)}</a>')
+        links.append(f'<a href="{slug}.html">{escape(scenario.title)} - {slug}</a>')
         body = '<nav><a href="index.html">All recorded cases</a></nav>'
         body += "<p>Predefined case, already executed. This page cannot change a run.</p>"
-        body += f"<p>{escape(report['adapter']['label'])}. Synthetic data only.</p>"
+        body += f"<p>{escape(controller_label(report))}. Synthetic data only.</p>"
         body += (
             f"<p>Execution: {escape(report['execution_status'])}; "
             f"business outcome: {escape(report['business_outcome'])}; "
@@ -73,9 +97,11 @@ def generate_demo(output: Path) -> None:
             "evidence-anchor.json",
             "manifest.json",
         ):
-            body += f'<a href="runs/{scenario.id}/{name}">{name}</a>'
+            body += f'<a href="runs/{slug}/{name}">{name}</a>'
         body += "</nav><p>tamper-evident (not tamper-proof). Keep a trusted digest separately.</p>"
-        (output / f"{scenario.id}.html").write_text(_page(scenario.title, body), encoding="utf-8")
+        (output / f"{slug}.html").write_text(
+            _page(f"{slug}: {scenario.title}", body), encoding="utf-8"
+        )
     body = (
         "<p>Offline procurement rehearsal · synthetic fixtures · seed 42.</p>"
         "<p>deterministic reference controller (not an AI agent).</p>"
@@ -96,7 +122,7 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     generate_demo(args.output)
-    print("Generated static demo and five offline evidence bundles.")
+    print("Generated static demo and seven offline evidence bundles (one intentional FAIL).")
 
 
 if __name__ == "__main__":

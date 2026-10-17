@@ -16,7 +16,7 @@ def test_demo_real_runs_private_and_relative(tmp_path: Path):
     output = tmp_path / "demo"
     generate_demo(output)
     pages = list(output.glob("*.html"))
-    assert len(pages) == 6
+    assert len(pages) == 8
     for path in output.rglob("*"):
         if path.is_file():
             data = path.read_bytes()
@@ -32,7 +32,8 @@ def test_demo_real_runs_private_and_relative(tmp_path: Path):
             assert not href.startswith(("/", "http:", "https:", "file:"))
             assert (output / href).exists()
     for run in (output / "runs").iterdir():
-        assert evaluate_run(run / "run.sqlite").verdict == "pass"
+        expected = "fail" if run.name == "false-success" else "pass"
+        assert evaluate_run(run / "run.sqlite").verdict == expected
         anchor = json.loads((run / "evidence-anchor.json").read_text())
         assert verify_ledger(run / "evidence.jsonl", anchor["head"], anchor["count"])[0]
 
