@@ -34,3 +34,31 @@ def test_supplier_fault_missing_is_detected(tmp_path, monkeypatch):
         next(a for a in result.evaluation.assertions if a.id == "expected_business_outcome").status
         == "fail"
     )
+
+
+def test_response_lost_reconciles_once(tmp_path):
+    result = execute_run(load_scenario("response-lost"), 42, tmp_path / "lost")
+    assert result.evaluation.verdict == "pass"
+    check = next(a for a in result.evaluation.assertions if a.id == "unknown_outcome_reconciled")
+    assert check.status == "pass"
+    assert (
+        len([e for e in result.report["events"] if e["event_type"] == "purchase_order.created"])
+        == 1
+    )
+    assert any(t["to_state"] == "RECONCILING" for t in result.report["workflow_transitions"])
+
+
+def test_response_lost_missing_lookup_fails(tmp_path):
+    import sqlite3
+
+    from agent_rehearsal.evaluator import evaluate_run
+
+    result = execute_run(load_scenario("response-lost"), 42, tmp_path / "lost")
+    with sqlite3.connect(result.run_dir / "run.sqlite") as conn:
+        conn.execute("DELETE FROM tool_calls WHERE tool = 'get_purchase_order_by_intent'")
+    check = next(
+        a
+        for a in evaluate_run(result.run_dir / "run.sqlite").assertions
+        if a.id == "unknown_outcome_reconciled"
+    )
+    assert check.status == "fail"

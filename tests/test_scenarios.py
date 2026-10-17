@@ -65,6 +65,7 @@ def test_catalog_contains_shipped_scenarios():
     assert [(s.id, s.catalog_id) for s in list_scenarios()] == [
         ("duplicate-po", "S11"),
         ("happy-path", "S01"),
+        ("response-lost", "S02"),
         ("supplier-changed", "S04"),
     ]
 

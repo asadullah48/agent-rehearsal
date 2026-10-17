@@ -107,8 +107,8 @@ class Expected(Strict):
 
 class Fault(Strict):
     id: Slug
-    effect: Literal["supplier_suspension"]
-    boundary: Literal["before_purchase"]
+    effect: Literal["supplier_suspension", "response_loss"]
+    boundary: Literal["before_purchase", "after_purchase_commit"]
     occurrence: int = Field(default=1, ge=1)
     max_firings: Literal[1] = 1
 
@@ -152,6 +152,10 @@ def validate_references(scenario: Scenario) -> None:
     _unique([a.id for a in scenario.reviewer_actions], "reviewer action")
     _unique(list(scenario.required_assertions), "required assertion")
     _unique([f.id for f in scenario.faults], "fault")
+    for fault in scenario.faults:
+        boundary = "after_purchase_commit" if fault.effect == "response_loss" else "before_purchase"
+        if fault.boundary != boundary:
+            raise ScenarioError(f"fault {fault.id}: effect requires {boundary}")
     suppliers = {s.id for s in world.suppliers}
     budgets = {b.id: b for b in world.budgets}
     requests = {r.id for r in world.requests}
