@@ -1,3 +1,5 @@
+import getpass
+import platform
 import re
 from pathlib import Path
 
@@ -19,6 +21,8 @@ def test_demo_real_runs_private_and_relative(tmp_path: Path):
         if path.is_file():
             data = path.read_bytes()
             assert not re.search(rb"[A-Za-z]:[\\/]|\\\\[A-Za-z0-9]|/Users/|/home/", data)
+            for private_name in (getpass.getuser(), platform.node()):
+                assert private_name.lower().encode() not in data.lower()
     for page in pages:
         html = page.read_text(encoding="utf-8")
         assert 'name="viewport"' in html

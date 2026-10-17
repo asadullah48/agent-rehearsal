@@ -4,7 +4,7 @@ An offline simulator and independent evaluator that checks whether a tool-using
 controller preserves **approval**, **idempotency** and **budget** invariants in a
 fictional procurement workflow.
 
-> **Status: Session 3 (local recovery, atomic export, offline adapter boundary).**
+> **Status: Session 4 (static recorded demo; local recovery and offline controllers).**
 > Two offline controllers ship: a **deterministic reference controller** and a
 > **scripted offline decision replay**. Both make **zero model calls**. Nothing
 > here demonstrates the behavior of a live LLM agent.
@@ -281,7 +281,7 @@ connections and `.env` reads. No runtime or development dependencies were added.
   nothing about how an LLM agent would behave, and it does not show that unseen
   cases are safe.
 - **Bounded Session 3 scope.** The three core disruptions and local evidence
-  bundle work. There is no frontend, API server, MCP adapter, decision forks,
+  bundle work. There is no API server, MCP adapter, decision forks,
   authentication, billing, deployment or external integration. Expiry, policy
   changes, failed compensation remain backlog. Named local process-crash recovery is covered below.
 - **Bounded local recovery.** Real subprocess termination is tested at six workflow
@@ -304,3 +304,25 @@ connections and `.env` reads. No runtime or development dependencies were added.
   owner until one is added.
 
 See `docs/ADR-001-OFFLINE-KERNEL.md` and `docs/SESSION-3-CHECKPOINT.md`.
+
+## Static recorded demo (Session 4)
+
+Generate and open a read-only local viewer in PowerShell (use a fresh output directory):
+
+```powershell
+.venv\Scripts\python.exe -m agent_rehearsal.demo --output .rehearsal/session4-demo
+Invoke-Item .rehearsal/session4-demo/index.html
+```
+
+The generator executes all five synthetic fixtures with seed 42, then writes six
+HTML pages and their original evidence bundles. Selecting a case opens an
+already-executed recording. No server, installation, network runtime call or
+browser-side execution engine is needed. Existing output is refused. Expand
+timeline entries to inspect event IDs, simulated times and payloads; recorded
+tool calls and assertion evidence references appear alongside relative links to
+the original bundles. This uses a deterministic reference controller (not an AI agent).
+Evidence is tamper-evident (not tamper-proof).
+
+Independent verification commands, validation results and continuing limitations
+are in [Session 4 checkpoint](docs/SESSION-4-CHECKPOINT.md). The repository stays
+private and the [portfolio card](docs/PORTFOLIO-CARD-DRAFT.md) stays a draft.
