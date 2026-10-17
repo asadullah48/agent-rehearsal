@@ -14,7 +14,7 @@ from pathlib import Path
 
 from agent_rehearsal.controller import ADAPTER
 from agent_rehearsal.evaluator import evaluate_run
-from agent_rehearsal.evidence import verify_ledger
+from agent_rehearsal.evidence import EXPORT_POINTS, verify_ledger
 from agent_rehearsal.playback import load_playback, render, verify_against_report
 from agent_rehearsal.recovery import CRASH_POINTS
 from agent_rehearsal.report import load_report
@@ -71,7 +71,13 @@ def cmd_run(args: argparse.Namespace) -> int:
     try:
         if output.exists() and (not output.is_dir() or any(output.iterdir())):
             raise OutputDirectoryNotEmpty(f"refusing to write into nonempty path: {output}")
-        result = execute_run(scenario, args.seed, output, crash_at=args.crash_at)
+        result = execute_run(
+            scenario,
+            args.seed,
+            output,
+            crash_at=args.crash_at,
+            crash_during_export=args.crash_during_export,
+        )
     except OutputDirectoryNotEmpty as exc:
         return _err(str(exc))
     report = result.report
@@ -95,7 +101,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 def cmd_resume(args: argparse.Namespace) -> int:
     try:
-        result = resume_run(args.run_dir)
+        result = resume_run(args.run_dir, crash_during_export=args.crash_during_export)
     except (OSError, ValueError, KeyError, sqlite3.Error) as exc:
         return _err(str(exc))
     print(f"Controller: {result.report['adapter']['label']}")
@@ -205,9 +211,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--output", type=Path, required=True)
     run.add_argument("--scenarios-dir", type=Path, default=DEFAULT_SCENARIOS_DIR)
     run.add_argument("--crash-at", choices=CRASH_POINTS)
+    run.add_argument("--crash-during-export", choices=EXPORT_POINTS)
     run.set_defaults(func=cmd_run)
     resume = sub.add_parser("resume", help="recover an interrupted local run")
     resume.add_argument("--run-dir", type=Path, required=True)
+    resume.add_argument("--crash-during-export", choices=EXPORT_POINTS)
     resume.set_defaults(func=cmd_resume)
 
     rep = sub.add_parser("replay", help="recorded playback of a finished run")

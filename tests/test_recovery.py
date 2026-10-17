@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from contextlib import closing
 
 import pytest
 
@@ -25,7 +26,7 @@ def crash(output, scenario, point):
     )
     assert result.returncode == 86, result.stdout + result.stderr
     assert not (output / "report.json").exists()
-    with sqlite3.connect(output / "run.sqlite") as conn:
+    with closing(sqlite3.connect(output / "run.sqlite")) as conn:
         assert not conn.execute("SELECT 1 FROM events WHERE event_type='run.completed'").fetchone()
 
 
@@ -39,7 +40,7 @@ def check_resumed(output, scenario):
     checks = {a["id"]: a["status"] for a in report["assertions"]}
     for name in ("one_po_per_intent", "budget_conserved", "reservation_state_consistent"):
         assert checks[name] == "pass"
-    with sqlite3.connect(output / "run.sqlite") as conn:
+    with closing(sqlite3.connect(output / "run.sqlite")) as conn:
         assert conn.execute("SELECT COUNT(*) FROM purchase_orders").fetchone()[0] <= 1
     return report
 
@@ -69,10 +70,10 @@ def test_existing_disruptions_survive_process_restart(tmp_path, scenario, point)
 def test_ambiguous_purchase_reconciles_before_any_new_mutation(tmp_path):
     output = tmp_path / "run"
     crash(output, "happy-path", "after-purchase-commit")
-    with sqlite3.connect(output / "run.sqlite") as conn:
+    with closing(sqlite3.connect(output / "run.sqlite")) as conn:
         cursor = conn.execute("SELECT MAX(seq) FROM tool_calls").fetchone()[0]
     check_resumed(output, "happy-path")
-    with sqlite3.connect(output / "run.sqlite") as conn:
+    with closing(sqlite3.connect(output / "run.sqlite")) as conn:
         later = conn.execute(
             "SELECT tool FROM tool_calls WHERE seq > ? ORDER BY seq", (cursor,)
         ).fetchall()
@@ -88,10 +89,11 @@ def test_resume_refuses_corrupt_evidence(tmp_path, target):
         p = output / "evidence.jsonl"
         p.write_text(p.read_text().replace("HARNESS", "FORGED"))
     else:
-        with sqlite3.connect(output / "run.sqlite") as conn:
+        with closing(sqlite3.connect(output / "run.sqlite")) as conn:
             conn.execute(
                 "UPDATE events SET actor_id='FORGED' WHERE seq=(SELECT MIN(seq) FROM events)"
             )
+            conn.commit()
     assert main(["resume", "--run-dir", str(output)]) == 2
     assert not (output / "report.json").exists()
 

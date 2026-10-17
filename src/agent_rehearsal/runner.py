@@ -23,7 +23,7 @@ from agent_rehearsal.controller import (
     ToolProposal,
 )
 from agent_rehearsal.evaluator import Evaluation, evaluate_run
-from agent_rehearsal.evidence import export_bundle
+from agent_rehearsal.evidence import export_bundle, recover_export
 from agent_rehearsal.models import Actor, ToolResult
 from agent_rehearsal.policy import KNOWN_POLICIES
 from agent_rehearsal.privileged import ReviewerConsole, ScenarioConsole
@@ -34,7 +34,7 @@ from agent_rehearsal.recovery import (
     unknown_response,
     validate_recovery_evidence,
 )
-from agent_rehearsal.report import build_report, load_report, write_report
+from agent_rehearsal.report import build_report, load_report
 from agent_rehearsal.scenarios import Scenario, parse_scenario
 from agent_rehearsal.store import HARNESS, Store
 from agent_rehearsal.tools import ToolGateway
@@ -65,7 +65,12 @@ def prepare_output_dir(output: Path) -> None:
 
 
 def execute_run(
-    scenario: Scenario, seed: int, output: Path, *, crash_at: str | None = None
+    scenario: Scenario,
+    seed: int,
+    output: Path,
+    *,
+    crash_at: str | None = None,
+    crash_during_export: str | None = None,
 ) -> RunResult:
     """Run an already validated scenario. Callers must validate input first."""
     wall_start = time.perf_counter()
@@ -95,12 +100,12 @@ def execute_run(
     wall_ms = round((time.perf_counter() - wall_start) * 1000, 3)
     evaluation = evaluate_run(output / DB_NAME)
     report = build_report(output / DB_NAME, evaluation, wall_clock_ms=wall_ms)
-    write_report(output / REPORT_NAME, report)
-    export_bundle(output, report)
+    export_bundle(output, report, crash_during_export=crash_during_export)
     return RunResult(output, evaluation, report)
 
 
-def resume_run(output: Path) -> RunResult:
+def resume_run(output: Path, *, crash_during_export: str | None = None) -> RunResult:
+    recover_export(output)
     store = Store.open_existing(output / DB_NAME)
     try:
         validate_recovery_evidence(store)
@@ -122,9 +127,7 @@ def resume_run(output: Path) -> RunResult:
     report = build_report(output / DB_NAME, evaluation, wall_clock_ms=0)
     if (output / REPORT_NAME).exists():
         report = load_report(output / REPORT_NAME)
-    else:
-        write_report(output / REPORT_NAME, report)
-    export_bundle(output, report)
+    export_bundle(output, report, crash_during_export=crash_during_export)
     return RunResult(output, evaluation, report)
 
 
