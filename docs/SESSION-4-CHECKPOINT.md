@@ -3,7 +3,79 @@
 Date: 2026-10-17 (Asia/Karachi). Branch: `feat/session-4-demo`.
 Starting main: `d46b10e87303eb5261fd19e99705b26e29334314`.
 
-## Done
+## Follow-up F1 / F2 / F3 completed
+
+Follow-up starts at `e491933` on the same `feat/session-4-demo` branch. No PR,
+merge, deployment or publication. No dependencies added. Repository remains
+private; portfolio card stays a draft.
+
+- F1 (`e92edfb`): seven real offline runs over the five fixtures. Added
+  `false-success` and `stale-approval`, both using the Session 3 scripted adapter
+  and labelled **scripted offline agent (replayed decisions, no model calls)**.
+  Each attempts purchase twice after approval revocation; both calls are blocked
+  with `APPROVAL_REVOKED` and certainty `not_committed`. Neither creates a PO.
+  False-success nevertheless claims `FULFILLED`, fails `expected_business_outcome`,
+  and has verdict FAIL. Stale-approval claims `REFUSED` and correctly passes.
+  Original reference-controller S03/S04 expected refusals remain visibly distinct
+  from evaluation FAIL. Original adapter labels remain visible too.
+- F2 (`9542e7e`): index cards grouped under “Controller handles disruptions” and
+  “Evaluator catches a bad agent”. Cards display scenario ID, controller, execution
+  status, business outcome, verdict badge and a one-line disruption summary.
+  Case pages show assertion results and event-ID links into an ordered timeline,
+  original tool responses, PO count, and blocked purchase-commit count. Events are
+  open by default, can be collapsed, and receive a visible outline when targeted.
+  Semantic HTML, skip link, native controls, explicit focus rings, wrapping text,
+  and text-labelled high-contrast PASS/FAIL/NOT_APPLICABLE badges require no scripts,
+  fonts, CDNs or external resources. NOT_APPLICABLE is an assertion result; no
+  generated run is mislabelled as unevaluated.
+- F3 (`4f7cb3d`): six tests in `tests/test_demo_view.py` compare rendered values
+  against original reports, resolve every assertion event link, inject unsafe
+  fixture text, reject external resources, distinguish false-success FAIL from
+  expected refusal PASS, and check title/lang/headings/structure. F1 adds another
+  test for the real scripted outcomes and exact CLI exit codes.
+- All 162 existing test cases remain. The original demo regression now expects
+  eight pages, the one intended failed run, and valid same-page event fragments;
+  its privacy and evidence checks remain intact. All 160 pre-demo tests are unchanged.
+- CI is now **verified: GitHub Actions run 39019867173 succeeded**.
+  Evidence: user-verified [Actions run](https://github.com/asadullah48/agent-rehearsal/actions/runs/39019867173).
+  This records the supplied pre-follow-up CI result; it does not claim that the
+  new follow-up commits have already completed their own GitHub Actions run.
+
+### Follow-up validation
+
+| Check | Result |
+| --- | --- |
+| Starting baseline | 162 passed in 151.15s |
+| Final full suite | **169 passed in 202.33s** |
+| New coverage | 1 scripted-case test + 6 viewer tests |
+| F1/F2 focused checks | 3 passed; scripted cases, privacy and overwrite refusal |
+| F3 focused checks | 6 passed in 56.50s |
+| Ruff check / format | Clean |
+| Generated artifacts | 8 HTML pages, 7 original evidence bundles |
+| Independent CLI smoke | 21 exits as expected: evaluate false-success = 1; all other exits = 0 |
+| Manifest hashes | All entries match across all 7 bundles |
+| Privacy | Every generated file scanned, including SQLite; no absolute paths or current user/machine names |
+| Installed Edge | All 8 pages: body clientWidth=380, body scrollWidth=380 with all details expanded |
+
+New evidence is ignored under `.rehearsal/session4-followup-final/` and
+`.rehearsal/session4-followup-validation/`. Edge QA copies constrained content to
+380px; this is still not a true 380px browser viewport/touch-device check. The
+index screenshot was inspected. Reused Edge profiles and an unwaited GUI output
+capture initially returned no DOM; a waiting pipeline with dedicated local
+profiles produced all eight measurements. Edge emitted renderer task-manager
+diagnostics but returned the expected DOM and screenshot. No installation or
+loopback server was used. QA scripts are outside the generated demo.
+
+### Follow-up changed files
+
+8 files relative to `e491933`: `src/agent_rehearsal/demo.py`,
+`scripts/false-success.json`, `tests/test_demo.py`, `tests/test_demo_cases.py`,
+`tests/test_demo_view.py`, `README.md`, `docs/PORTFOLIO-CARD-DRAFT.md`, and this
+checkpoint. The branch has 9 changed files relative to main, including its
+previously committed CI workflow. Final docs commit and actual push are reported
+in chat.
+
+## Initial Session 4 delivery (historical)
 
 - Created the requested branch from clean main. No PR, merge, deployment or
   publication is authorized. Repository remains private; portfolio card is a draft.
@@ -17,11 +89,12 @@ Starting main: `d46b10e87303eb5261fd19e99705b26e29334314`.
   No host paths, usernames or machine names are inserted into generated output.
 - M2: workflow installs existing `.[dev]` extras and runs pytest with the addopts
   override, Ruff check and Ruff format check on push and pull_request. No secrets
-  or deployment steps. CI: **written, unverified until first GitHub Actions run**.
+  or deployment steps. Initial CI status was unverified; it is now
+  **verified: GitHub Actions run 39019867173 succeeded** (user-verified).
 - M3: evidence-linked portfolio draft, README usage and this checkpoint.
   No dependencies were added. All original tests and the offline guard are preserved.
 
-## Validation evidence
+## Initial validation evidence (before follow-up)
 
 All Python commands used `.venv\Scripts\python.exe`.
 
@@ -36,8 +109,9 @@ All Python commands used `.venv\Scripts\python.exe`.
 | Manifest hashes | None | All 5 bundles match every manifest entry |
 | Browser | Installed Edge | All 6 pages: body clientWidth=380, body scrollWidth=380 with all details expanded |
 
-`test_demo_real_runs_private_and_relative` independently evaluates all five SQLite
-databases and verifies all five ledgers. `test_demo_refuses_existing_output` checks
+Initially, `test_demo_real_runs_private_and_relative` evaluated all five SQLite
+databases and verified all five ledgers. It now covers all seven, including the
+expected failed verdict. `test_demo_refuses_existing_output` checks
 overwrite refusal. The initial regression collection failed with the missing demo
 module before implementation. The final full suite passed; the privacy test was
 then strengthened with explicit current username/machine checks and rerun separately.
@@ -76,8 +150,9 @@ chat report. Generated evidence and browser QA stay under ignored `.rehearsal/`.
 - Fixed a stray CSS selector prefix before generating the demonstration. Ruff and
   generated-output regressions passed afterward. No automatic approval rejection
   blocked delivery. No global settings, credentials or environment were changed.
-- GitHub Actions cannot be validated offline. Local checks do not establish a
-  GitHub Actions result or a required merge-blocking check.
+- GitHub Actions cannot be validated offline. The user verified run 39019867173
+  succeeded. Local checks alone do not establish a GitHub Actions result or a
+  required merge-blocking check.
 
 ## Not done / limits
 
@@ -101,15 +176,16 @@ All [Session 3 limits](SESSION-3-CHECKPOINT.md#not-done--limits) still apply:
   be unsafe; a passing refusal exercise does not certify a script. The protocol
   does not sandbox untrusted Python. Synthetic observations are not production
   reliability or throughput measurements. The viewer uses a
-  **deterministic reference controller (not an AI agent)**.
+  **deterministic reference controller (not an AI agent)** in five cases and a
+  **scripted offline agent (replayed decisions, no model calls)** in two cases.
 - Forks, reviewer mutation, live agents, MCP and Arabic remain deferred, with no
   delivered-feature claims. No real purchasing, SDK, model call, API key,
   new dependency, runtime networking, application server or hosting was added.
 - Viewer generation itself is not crash-resumable or atomically published. If
   generation is interrupted, use a fresh output directory. Privacy checks cover
   the shipped synthetic fixtures; this is not a general arbitrary-data scrubber.
-- No publication, PR or merge. Portfolio stays a draft. CI and true phone checks
-  retain the unverified status stated above.
+- No publication, PR or merge. Portfolio stays a draft. True phone viewport/touch
+  checks remain manual/unverified; CI has the user-verified result stated above.
 
 ## Exact PowerShell review commands
 
@@ -117,17 +193,37 @@ Run from the repository root. Output must be fresh (choose another name if it
 already exists). Opening the file is a local browser action, without a server.
 
 ```powershell
-.venv\Scripts\python.exe -m agent_rehearsal.demo --output .rehearsal/session4-demo
+.venv\Scripts\python.exe -m agent_rehearsal.demo --output .rehearsal/session4-review
 if ($LASTEXITCODE -ne 0) { throw 'Demo generation failed' }
-Invoke-Item .rehearsal/session4-demo/index.html
+Invoke-Item .rehearsal/session4-review/index.html
 ```
 
-Independently evaluate and verify every generated run, including manifest hashes:
+Exact expected exits (evaluate / verify / replay):
+
+| Run | evaluate | verify | replay |
+| --- | --- | --- | --- |
+| happy-path | 0 | 0 | 0 |
+| approval-revoked | 0 | 0 | 0 |
+| supplier-changed | 0 | 0 | 0 |
+| duplicate-po | 0 | 0 | 0 |
+| response-lost | 0 | 0 | 0 |
+| stale-approval | 0 | 0 | 0 |
+| false-success | **1 (expected evaluation FAIL)** | 0 | 0 |
+
+Independently review every generated run and its manifest without throwing on the
+intentional failure:
 
 ```powershell
-Get-ChildItem .rehearsal/session4-demo/runs -Directory | ForEach-Object {
-    $run = $_.FullName
-    foreach ($command in @('evaluate', 'verify', 'replay')) {
+$expected = @{
+    'happy-path' = 0; 'approval-revoked' = 0; 'supplier-changed' = 0
+    'duplicate-po' = 0; 'response-lost' = 0; 'stale-approval' = 0
+    'false-success' = 1
+}
+foreach ($entry in $expected.GetEnumerator()) {
+    $run = Join-Path '.rehearsal/session4-review/runs' $entry.Key
+    & .venv\Scripts\python.exe -m agent_rehearsal evaluate --run-dir $run
+    if ($LASTEXITCODE -ne $entry.Value) { throw "Unexpected evaluate exit: $run" }
+    foreach ($command in @('verify', 'replay')) {
         & .venv\Scripts\python.exe -m agent_rehearsal $command --run-dir $run
         if ($LASTEXITCODE -ne 0) { throw "$command failed for $run" }
     }
@@ -139,7 +235,7 @@ Get-ChildItem .rehearsal/session4-demo/runs -Directory | ForEach-Object {
 }
 ```
 
-Full validation (all 160 prior tests plus new demo regressions):
+Full validation (all 162 existing test cases plus 7 follow-up tests):
 
 ```powershell
 .venv\Scripts\python.exe -m pytest -o "addopts=" -q
