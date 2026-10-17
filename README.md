@@ -114,6 +114,8 @@ python -m agent_rehearsal verify --run-dir .rehearsal/demo/happy --expected-head
 ```
 
 `verify` returns 0 for a matching chain, 1 for tampering, and 2 for invalid input.
+For six events, success reads `PASS: 6 records verified (head index 5)`.
+An empty chain reports `head index none`.
 Failures identify the first affected zero-based record index; a changed retained
 digest is detected at the end of an otherwise internally valid chain. The command
 checks the exported event ledger, not database/report consistency or manifest hashes.

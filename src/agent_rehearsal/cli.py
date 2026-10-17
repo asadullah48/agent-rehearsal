@@ -162,7 +162,11 @@ def cmd_verify(args: argparse.Namespace) -> int:
         ok, index, reason = verify_ledger(args.run_dir / "evidence.jsonl", head, count)
     except (OSError, ValueError, KeyError, TypeError) as exc:
         return _err(str(exc))
-    print(f"{'PASS' if ok else 'FAIL'}: {reason}; zero-based record index {index}")
+    if ok:
+        head = str(index - 1) if index else "none"
+        print(f"PASS: {index} records verified (head index {head})")
+    else:
+        print(f"FAIL: {reason}; zero-based record index {index}")
     print("Tamper-evident (not tamper-proof); retain the final digest separately.")
     return EXIT_PASS if ok else EXIT_FAIL
 
