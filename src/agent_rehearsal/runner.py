@@ -1,0 +1,161 @@
+"""Synchronous run harness (deterministic rerun from fixture + seed).
+
+The harness is the trusted party: it binds actor identities, executes each
+controller proposal through the gateway, applies scripted reviewer actions when
+the controller pauses for review, journals workflow transitions, and closes the
+run. It then evaluates from the persisted database and writes ``report.json``.
+"""
+
+from __future__ import annotations
+
+import time
+import uuid
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from agent_rehearsal.controller import (
+    ADAPTER,
+    AwaitReview,
+    Finished,
+    ReferenceController,
+    ToolProposal,
+)
+from agent_rehearsal.evaluator import Evaluation, evaluate_run
+from agent_rehearsal.models import Actor
+from agent_rehearsal.policy import KNOWN_POLICIES
+from agent_rehearsal.privileged import ReviewerConsole
+from agent_rehearsal.report import build_report, write_report
+from agent_rehearsal.scenarios import Scenario
+from agent_rehearsal.store import Store
+from agent_rehearsal.tools import ToolGateway
+
+CONTROLLER_ACTOR = Actor(actor_id="CTRL-REF", role="controller")
+DB_NAME = "run.sqlite"
+REPORT_NAME = "report.json"
+
+
+class OutputDirectoryNotEmpty(FileExistsError):
+    pass
+
+
+@dataclass(frozen=True)
+class RunResult:
+    run_dir: Path
+    evaluation: Evaluation
+    report: dict[str, Any]
+
+
+def prepare_output_dir(output: Path) -> None:
+    if output.exists():
+        if not output.is_dir():
+            raise OutputDirectoryNotEmpty(f"output path exists and is not a directory: {output}")
+        if any(output.iterdir()):
+            raise OutputDirectoryNotEmpty(f"refusing to write into nonempty directory: {output}")
+    output.mkdir(parents=True, exist_ok=True)
+
+
+def execute_run(scenario: Scenario, seed: int, output: Path) -> RunResult:
+    """Run an already validated scenario. Callers must validate input first."""
+    wall_start = time.perf_counter()
+    prepare_output_dir(output)
+    policy = KNOWN_POLICIES[scenario.policy_version]
+    store = Store.create(
+        output / DB_NAME,
+        run_id=f"run-{uuid.uuid4().hex[:12]}",
+        scenario=scenario,
+        policy=policy,
+        seed=seed,
+        adapter=ADAPTER,
+    )
+    try:
+        _drive(
+            store, scenario, seed, policy.max_proposed_actions, policy.max_attempts_per_operation
+        )
+    finally:
+        store.close()
+
+    wall_ms = round((time.perf_counter() - wall_start) * 1000, 3)
+    evaluation = evaluate_run(output / DB_NAME)
+    report = build_report(output / DB_NAME, evaluation, wall_clock_ms=wall_ms)
+    write_report(output / REPORT_NAME, report)
+    return RunResult(output, evaluation, report)
+
+
+def _drive(
+    store: Store, scenario: Scenario, seed: int, max_actions: int, max_attempts: int
+) -> None:
+    gateway = ToolGateway(store, CONTROLLER_ACTOR)
+    consoles = {
+        r.id: ReviewerConsole(store, Actor(actor_id=r.id, role="reviewer"))
+        for r in scenario.reviewers
+    }
+    pending = list(scenario.reviewer_actions)
+    controller = ReferenceController(
+        request_id=scenario.task.request_id, seed=seed, max_attempts_per_operation=max_attempts
+    )
+    journaled = 0
+
+    def journal() -> None:
+        nonlocal journaled
+        for t in controller.transitions[journaled:]:
+            store.record_transition(t.from_state.value, t.to_state.value, t.reason)
+        journaled = len(controller.transitions)
+
+    proposals = 0
+    drive = controller.drive()
+    reply = None
+    try:
+        while True:
+            try:
+                decision = drive.send(reply)
+            except StopIteration as stop:
+                journal()
+                finished: Finished = stop.value
+                store.finish_run(
+                    "completed", controller_state=finished.state.value, summary=finished.summary
+                )
+                return
+            journal()
+            if isinstance(decision, ToolProposal):
+                proposals += 1
+                if proposals > max_actions:
+                    drive.close()
+                    store.finish_run(
+                        "completed",
+                        controller_state=controller.state.value,
+                        summary="proposed-action limit reached; outcome unresolved",
+                        limit_reached="max_proposed_actions",
+                    )
+                    return
+                reply = gateway.call(decision.tool, decision.arguments)
+            elif isinstance(decision, AwaitReview):
+                due = [
+                    a
+                    for a in pending
+                    if a.trigger == "on_awaiting_approval" and a.request_id == decision.request_id
+                ]
+                if not due:
+                    drive.close()
+                    store.finish_run(
+                        "paused",
+                        controller_state=controller.state.value,
+                        summary="awaiting reviewer approval; no scripted reviewer action remains",
+                    )
+                    return
+                action = due[0]
+                pending.remove(action)
+                consoles[action.reviewer_id].grant_approval(action.request_id, action.ttl_seconds)
+                reply = None
+            else:  # pragma: no cover - defensive
+                raise TypeError(f"unknown controller decision {decision!r}")
+    except Exception as exc:
+        # A broken harness must still leave evidence; the evaluator then reports at
+        # best "inconclusive" because execution_status is "error".
+        drive.close()
+        journal()
+        store.finish_run(
+            "error",
+            controller_state=controller.state.value,
+            summary=f"harness error: {type(exc).__name__}: {exc}",
+        )

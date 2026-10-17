@@ -1,0 +1,20 @@
+# Generated run artifacts (databases, reports) - never committed
+.rehearsal/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
+# Credentials and personal local files
+.env
+.env.*
+
+# Python tooling
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
