@@ -92,7 +92,10 @@ def _drive(
     }
     pending = list(scenario.reviewer_actions)
     controller = ReferenceController(
-        request_id=scenario.task.request_id, seed=seed, max_attempts_per_operation=max_attempts
+        request_id=scenario.task.request_id,
+        seed=seed,
+        max_attempts_per_operation=max_attempts,
+        duplicate_po_attempt=scenario.duplicate_po_attempt,
     )
     journaled = 0
 

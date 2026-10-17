@@ -267,7 +267,17 @@ def _one_po_per_intent(ev: _Evidence) -> AssertionResult:
         problems.append(f"{len(evidence)} commit events for {len(ev.pos)} purchase orders")
     if problems:
         return _result(aid, "fail", expected, "; ".join(problems), evidence)
-    return _result(aid, "pass", expected, f"{len(ev.pos)} purchase order(s), unique", evidence)
+    blocked = sum(
+        (c["response"].get("error") or {}).get("reason_code") == "DUPLICATE_INTENT"
+        for c in ev.tool_calls
+    )
+    return _result(
+        aid,
+        "pass",
+        expected,
+        f"{len(ev.pos)} purchase order(s), unique; {blocked} duplicate attempt(s) blocked",
+        evidence,
+    )
 
 
 def _budget_conserved(ev: _Evidence) -> AssertionResult:

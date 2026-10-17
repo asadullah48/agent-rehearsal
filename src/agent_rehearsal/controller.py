@@ -89,6 +89,7 @@ class ReferenceController:
     request_id: str
     seed: int
     max_attempts_per_operation: int = 3
+    duplicate_po_attempt: bool = False
     state: WorkflowState = WorkflowState.NEW
     transitions: list[Transition] = field(default_factory=list)
 
@@ -178,6 +179,19 @@ class ReferenceController:
         )
         assert committed is not None
         if committed.status == "ok":
+            if self.duplicate_po_attempt:
+                duplicate = yield ToolProposal(
+                    "create_purchase_order",
+                    {
+                        "request_id": rid,
+                        "reservation_id": reservation_id,
+                        "approval_id": approval["id"],
+                        "operation_key": self._key("duplicate"),
+                    },
+                )
+                assert duplicate is not None
+                if duplicate.error is None or duplicate.error.reason_code != "DUPLICATE_INTENT":
+                    return self._end(S.ESCALATED, "duplicate purchase was not blocked as expected")
             return (yield from self._verify(request["logical_intent_id"]))
         assert committed.error is not None
         if committed.error.certainty != "not_committed":

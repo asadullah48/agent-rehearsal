@@ -122,6 +122,7 @@ class Scenario(Strict):
     reviewer_actions: list[ReviewerAction]
     expected: Expected
     required_assertions: list[AssertionId] = Field(min_length=1)
+    duplicate_po_attempt: bool = False
 
 
 def _unique(ids: list[str], what: str) -> None:
