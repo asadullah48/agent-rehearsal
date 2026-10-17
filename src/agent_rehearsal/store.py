@@ -26,6 +26,10 @@ if TYPE_CHECKING:
 
 SCHEMA = """
 CREATE TABLE run_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE evidence_chain (
+    record_index INTEGER PRIMARY KEY,
+    record_json TEXT NOT NULL
+);
 CREATE TABLE fault_firings (
     fault_id TEXT PRIMARY KEY,
     occurrence INTEGER NOT NULL,
@@ -228,6 +232,20 @@ class Tx:
                 self.meta("policy_version"),
                 operation_key,
             ),
+        )
+        event = self.row("SELECT * FROM events WHERE event_id = ?", (event_id,))
+        previous = self.row(
+            "SELECT record_index, record_json FROM evidence_chain "
+            "ORDER BY record_index DESC LIMIT 1"
+        )
+        record = {
+            "index": previous["record_index"] + 1 if previous else 0,
+            "event": event,
+            "previous_hash": json.loads(previous["record_json"])["hash"] if previous else "0" * 64,
+        }
+        record["hash"] = sha256_hex(record)
+        self.execute(
+            "INSERT INTO evidence_chain VALUES (?, ?)", (record["index"], canonical_json(record))
         )
         return event_id
 

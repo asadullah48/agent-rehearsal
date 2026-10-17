@@ -44,7 +44,14 @@ def test_documented_cli_flow(tmp_path):
     ran = cli("run", "--scenario", "happy-path", "--seed", "42", "--output", str(out))
     assert ran.returncode == 0, ran.stdout + ran.stderr
     assert "not an AI agent" in ran.stdout
-    assert sorted(p.name for p in out.iterdir()) == ["report.json", "run.sqlite"]
+    assert sorted(p.name for p in out.iterdir()) == [
+        "evidence-anchor.json",
+        "evidence.jsonl",
+        "manifest.json",
+        "report.json",
+        "run.sqlite",
+        "summary.md",
+    ]
 
     report = json.loads((out / "report.json").read_text(encoding="utf-8"))
     conn = sqlite3.connect(out / "run.sqlite")

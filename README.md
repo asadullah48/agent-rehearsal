@@ -100,6 +100,30 @@ test checks that.
 
 ## Design notes
 
+### Event chain verification (Session 2)
+
+Every event appends a SHA-256 chain record inside its SQLite transaction.
+Completed runs export `evidence.jsonl`, `evidence-anchor.json`, `summary.md`,
+and `manifest.json` alongside the database and report. Each record includes
+its zero-based index, full event, previous record hash, and current record hash.
+
+```bash
+python -m agent_rehearsal verify --run-dir .rehearsal/demo/happy
+python -m agent_rehearsal verify --run-dir .rehearsal/demo/happy --expected-head <retained-sha256> --expected-count <retained-count>
+```
+
+`verify` returns 0 for a matching chain, 1 for tampering, and 2 for invalid input.
+Failures identify the first affected zero-based record index; a changed retained
+digest is detected at the end of an otherwise internally valid chain. The command
+checks the exported event ledger, not database/report consistency or manifest hashes.
+File hashes in the manifest can be checked independently.
+
+This is **tamper-evident (not tamper-proof)**. Retain the final digest and count
+outside the writable bundle. Whoever controls the files can rewrite the entire
+chain, manifest and local anchor. Local-anchor verification alone detects edits
+and corruption, but cannot establish provenance or external truth. Old Session 1
+runs have no chain; rerun a scenario to generate a Session 2 evidence bundle.
+
 - **Trusted identity.** The harness binds each gateway or console to an `Actor`.
   Tool arguments are strict schemas that reject unknown fields, so a
   `"role": "reviewer"` field is a validation error, not a claim of authority.

@@ -23,6 +23,7 @@ from agent_rehearsal.controller import (
     ToolProposal,
 )
 from agent_rehearsal.evaluator import Evaluation, evaluate_run
+from agent_rehearsal.evidence import export_bundle
 from agent_rehearsal.models import Actor, ToolError
 from agent_rehearsal.policy import KNOWN_POLICIES
 from agent_rehearsal.privileged import ReviewerConsole, ScenarioConsole
@@ -80,6 +81,7 @@ def execute_run(scenario: Scenario, seed: int, output: Path) -> RunResult:
     evaluation = evaluate_run(output / DB_NAME)
     report = build_report(output / DB_NAME, evaluation, wall_clock_ms=wall_ms)
     write_report(output / REPORT_NAME, report)
+    export_bundle(output, report)
     return RunResult(output, evaluation, report)
 
 

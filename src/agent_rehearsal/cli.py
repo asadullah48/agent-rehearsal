@@ -7,11 +7,13 @@ harness error, inconclusive evaluation, or evidence that disagrees with itself.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
 from agent_rehearsal.controller import ADAPTER
 from agent_rehearsal.evaluator import evaluate_run
+from agent_rehearsal.evidence import verify_ledger
 from agent_rehearsal.playback import load_playback, render, verify_against_report
 from agent_rehearsal.report import load_report
 from agent_rehearsal.runner import (
@@ -150,6 +152,21 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     return VERDICT_EXIT[fresh.verdict]
 
 
+def cmd_verify(args: argparse.Namespace) -> int:
+    try:
+        anchor = json.loads((args.run_dir / "evidence-anchor.json").read_text(encoding="utf-8"))
+        head = args.expected_head if args.expected_head is not None else anchor["head"]
+        count = args.expected_count if args.expected_count is not None else anchor["count"]
+        if not isinstance(head, str) or len(head) != 64 or not isinstance(count, int) or count < 0:
+            return _err("invalid evidence anchor")
+        ok, index, reason = verify_ledger(args.run_dir / "evidence.jsonl", head, count)
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        return _err(str(exc))
+    print(f"{'PASS' if ok else 'FAIL'}: {reason}; zero-based record index {index}")
+    print("Tamper-evident (not tamper-proof); retain the final digest separately.")
+    return EXIT_PASS if ok else EXIT_FAIL
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agent_rehearsal",
@@ -178,6 +195,11 @@ def build_parser() -> argparse.ArgumentParser:
     ev = sub.add_parser("evaluate", help="re-evaluate a finished run from persisted evidence")
     ev.add_argument("--run-dir", type=Path, required=True)
     ev.set_defaults(func=cmd_evaluate)
+    verify = sub.add_parser("verify", help="verify the tamper-evident event chain")
+    verify.add_argument("--run-dir", type=Path, required=True)
+    verify.add_argument("--expected-head", help="separately retained final SHA-256")
+    verify.add_argument("--expected-count", type=int, help="separately retained record count")
+    verify.set_defaults(func=cmd_verify)
     return parser
 
 
