@@ -12,7 +12,7 @@ import random
 from collections.abc import Generator
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import Any, ClassVar
 
 from agent_rehearsal.models import ToolResult
 
@@ -86,6 +86,8 @@ Drive = Generator[Decision, ToolResult | None, Finished]
 
 @dataclass
 class ReferenceController:
+    metadata: ClassVar[dict[str, Any]] = ADAPTER
+    configuration: ClassVar[None] = None
     request_id: str
     seed: int
     max_attempts_per_operation: int = 3

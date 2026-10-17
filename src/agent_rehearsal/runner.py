@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from agent_rehearsal.adapters import Controller, ScriptedController, parse_script
 from agent_rehearsal.canonical import canonical_json
 from agent_rehearsal.controller import (
     ADAPTER,
@@ -71,6 +72,7 @@ def execute_run(
     *,
     crash_at: str | None = None,
     crash_during_export: str | None = None,
+    controller: Controller | None = None,
 ) -> RunResult:
     """Run an already validated scenario. Callers must validate input first."""
     wall_start = time.perf_counter()
@@ -82,8 +84,11 @@ def execute_run(
         scenario=scenario,
         policy=policy,
         seed=seed,
-        adapter=ADAPTER,
+        adapter=controller.metadata if controller else ADAPTER,
     )
+    if controller is not None and controller.configuration is not None:
+        with store.transaction() as tx:
+            tx.set_meta("adapter_configuration", canonical_json(controller.configuration))
     sync_ledger(store)
     try:
         _drive(
@@ -93,6 +98,7 @@ def execute_run(
             policy.max_proposed_actions,
             policy.max_attempts_per_operation,
             crash_at=crash_at,
+            controller=controller,
         )
     finally:
         store.close()
@@ -112,6 +118,16 @@ def resume_run(output: Path, *, crash_during_export: str | None = None) -> RunRe
         scenario = parse_scenario(store.meta("scenario_json"))
         seed = int(store.meta("seed"))
         policy = KNOWN_POLICIES[scenario.policy_version]
+        import json
+
+        adapter = json.loads(store.meta("adapter_json"))
+        controller = None
+        if adapter["id"] == "scripted-offline":
+            controller = ScriptedController(parse_script(store.meta("adapter_configuration")))
+            if controller.metadata != adapter:
+                raise ValueError("persisted scripted adapter metadata mismatch")
+        elif adapter != ADAPTER:
+            raise ValueError("unsupported adapter version for recovery")
         if store.meta("execution_status") == "running":
             _drive(
                 store,
@@ -120,6 +136,7 @@ def resume_run(output: Path, *, crash_during_export: str | None = None) -> RunRe
                 policy.max_proposed_actions,
                 policy.max_attempts_per_operation,
                 resuming=True,
+                controller=controller,
             )
     finally:
         store.close()
@@ -140,19 +157,25 @@ def _drive(
     *,
     crash_at: str | None = None,
     resuming: bool = False,
+    controller: Controller | None = None,
 ) -> None:
-    gateway = ToolGateway(store, CONTROLLER_ACTOR)
-    consoles = {
-        r.id: ReviewerConsole(store, Actor(actor_id=r.id, role="reviewer"))
-        for r in scenario.reviewers
-    }
-    pending = list(scenario.reviewer_actions)
-    controller = ReferenceController(
+    controller = controller or ReferenceController(
         request_id=scenario.task.request_id,
         seed=seed,
         max_attempts_per_operation=max_attempts,
         duplicate_po_attempt=scenario.duplicate_po_attempt,
     )
+    actor = (
+        CONTROLLER_ACTOR
+        if controller.metadata["id"] == ADAPTER["id"]
+        else Actor(actor_id="CTRL-SCRIPT", role="controller")
+    )
+    gateway = ToolGateway(store, actor)
+    consoles = {
+        r.id: ReviewerConsole(store, Actor(actor_id=r.id, role="reviewer"))
+        for r in scenario.reviewers
+    }
+    pending = list(scenario.reviewer_actions)
     journaled = len(store.rows("SELECT * FROM workflow_transitions"))
     decisions = DecisionJournal(store)
 
@@ -273,8 +296,23 @@ def _drive(
                                 "INSERT INTO fault_firings VALUES (?, ?, ?, ?)",
                                 (fault.id, purchase_occurrence, fault.effect, event_id),
                             )
-                if previous and decision.tool == "create_purchase_order" and reply.status == "ok":
-                    reply, _ = unknown_response(store, reply, "process-crash-recovery")
+                if (
+                    previous
+                    and decision.tool == "create_purchase_order"
+                    and (
+                        reply.status == "ok" or (reply.error and reply.error.certainty == "unknown")
+                    )
+                ):
+                    if reply.status == "ok":
+                        reply, _ = unknown_response(store, reply, "process-crash-recovery")
+                    intent = f"PI-{decision.arguments['request_id']}"
+                    found = gateway.call(
+                        "get_purchase_order_by_intent", {"logical_intent_id": intent}
+                    )
+                    if found.status != "ok":
+                        raise ValueError(
+                            "recovery could not reconcile recorded purchase; manual review required"
+                        )
                 decisions.complete(reply)
                 if decision.tool == "reserve_budget":
                     crash_if(crash_at, "after-reservation")

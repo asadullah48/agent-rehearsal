@@ -12,6 +12,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
+from agent_rehearsal.adapters import load_scripted
 from agent_rehearsal.controller import ADAPTER
 from agent_rehearsal.evaluator import evaluate_run
 from agent_rehearsal.evidence import EXPORT_POINTS, verify_ledger
@@ -63,6 +64,12 @@ def cmd_scenarios_list(args: argparse.Namespace) -> int:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
+    if (args.adapter == "scripted") != (args.script is not None):
+        return _err("--adapter scripted requires --script; reference does not accept --script")
+    try:
+        controller = load_scripted(args.script) if args.script is not None else None
+    except (OSError, ValueError) as exc:
+        return _err(str(exc))
     try:
         scenario = load_scenario(args.scenario, args.scenarios_dir)  # before any world exists
     except ScenarioError as exc:
@@ -77,11 +84,12 @@ def cmd_run(args: argparse.Namespace) -> int:
             output,
             crash_at=args.crash_at,
             crash_during_export=args.crash_during_export,
+            controller=controller,
         )
     except OutputDirectoryNotEmpty as exc:
         return _err(str(exc))
     report = result.report
-    print(LABEL)
+    print(f"Controller: {report['adapter']['label']}")
     print(f"Scenario: {scenario.id} ({scenario.catalog_id}) seed={args.seed}")
     print(f"Run directory: {output}")
     print(f"Execution status: {report['execution_status']}")
@@ -212,6 +220,8 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--scenarios-dir", type=Path, default=DEFAULT_SCENARIOS_DIR)
     run.add_argument("--crash-at", choices=CRASH_POINTS)
     run.add_argument("--crash-during-export", choices=EXPORT_POINTS)
+    run.add_argument("--adapter", choices=("reference", "scripted"), default="reference")
+    run.add_argument("--script", type=Path, help="offline JSON decision script")
     run.set_defaults(func=cmd_run)
     resume = sub.add_parser("resume", help="recover an interrupted local run")
     resume.add_argument("--run-dir", type=Path, required=True)
