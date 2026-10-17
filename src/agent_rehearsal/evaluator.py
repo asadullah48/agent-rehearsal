@@ -471,6 +471,20 @@ def _expected_business_outcome(ev: _Evidence, derived: str) -> AssertionResult:
         and len(ev.pos) == want["purchase_orders"]
         and claimed == derived
     )
+    for fault in ev.scenario.get("faults", []):
+        changes = ev.of_type("supplier.status_changed")
+        matching = [e for e in changes if e["payload"].get("to_status") == "suspended"]
+        denied = [
+            c
+            for c in ev.tool_calls
+            if c["tool"] == "create_purchase_order"
+            and (c["response"].get("error") or {}).get("reason_code") == "SUPPLIER_INACTIVE"
+        ]
+        ok = ok and bool(matching) and bool(denied)
+        evidence.extend(e["event_id"] for e in matching)
+        observed += (
+            f"; {fault['effect']}: {len(matching)} state change(s), {len(denied)} denied commit(s)"
+        )
     return _result(aid, "pass" if ok else "fail", expected, observed, evidence)
 
 

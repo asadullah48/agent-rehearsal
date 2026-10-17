@@ -26,6 +26,12 @@ if TYPE_CHECKING:
 
 SCHEMA = """
 CREATE TABLE run_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE fault_firings (
+    fault_id TEXT PRIMARY KEY,
+    occurrence INTEGER NOT NULL,
+    effect TEXT NOT NULL,
+    event_id TEXT NOT NULL
+);
 
 CREATE TABLE suppliers (
     id TEXT PRIMARY KEY,

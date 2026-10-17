@@ -105,6 +105,14 @@ class Expected(Strict):
     purchase_orders: int = Field(ge=0)
 
 
+class Fault(Strict):
+    id: Slug
+    effect: Literal["supplier_suspension"]
+    boundary: Literal["before_purchase"]
+    occurrence: int = Field(default=1, ge=1)
+    max_firings: Literal[1] = 1
+
+
 class Scenario(Strict):
     schema_version: Literal[1]
     id: Slug
@@ -123,6 +131,7 @@ class Scenario(Strict):
     expected: Expected
     required_assertions: list[AssertionId] = Field(min_length=1)
     duplicate_po_attempt: bool = False
+    faults: list[Fault] = Field(default_factory=list)
 
 
 def _unique(ids: list[str], what: str) -> None:
@@ -142,6 +151,7 @@ def validate_references(scenario: Scenario) -> None:
     _unique([r.id for r in scenario.reviewers], "reviewer")
     _unique([a.id for a in scenario.reviewer_actions], "reviewer action")
     _unique(list(scenario.required_assertions), "required assertion")
+    _unique([f.id for f in scenario.faults], "fault")
     suppliers = {s.id for s in world.suppliers}
     budgets = {b.id: b for b in world.budgets}
     requests = {r.id for r in world.requests}

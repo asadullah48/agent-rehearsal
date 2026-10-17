@@ -24,10 +24,10 @@ from agent_rehearsal.controller import (
 from agent_rehearsal.evaluator import Evaluation, evaluate_run
 from agent_rehearsal.models import Actor
 from agent_rehearsal.policy import KNOWN_POLICIES
-from agent_rehearsal.privileged import ReviewerConsole
+from agent_rehearsal.privileged import ReviewerConsole, ScenarioConsole
 from agent_rehearsal.report import build_report, write_report
 from agent_rehearsal.scenarios import Scenario
-from agent_rehearsal.store import Store
+from agent_rehearsal.store import HARNESS, Store
 from agent_rehearsal.tools import ToolGateway
 
 CONTROLLER_ACTOR = Actor(actor_id="CTRL-REF", role="controller")
@@ -106,6 +106,7 @@ def _drive(
         journaled = len(controller.transitions)
 
     proposals = 0
+    purchase_occurrence = 0
     drive = controller.drive()
     reply = None
     try:
@@ -131,6 +132,26 @@ def _drive(
                         limit_reached="max_proposed_actions",
                     )
                     return
+                if decision.tool == "create_purchase_order":
+                    purchase_occurrence += 1
+                    for fault in scenario.faults:
+                        if fault.occurrence != purchase_occurrence:
+                            continue
+                        if store.rows(
+                            "SELECT * FROM fault_firings WHERE fault_id = ?", (fault.id,)
+                        ):
+                            continue
+                        req = store.rows(
+                            "SELECT * FROM requests WHERE id = ?", (scenario.task.request_id,)
+                        )[0]
+                        event_id = ScenarioConsole(store, HARNESS).set_supplier_status(
+                            req["supplier_id"], "suspended"
+                        )
+                        with store.transaction() as tx:
+                            tx.execute(
+                                "INSERT INTO fault_firings VALUES (?, ?, ?, ?)",
+                                (fault.id, purchase_occurrence, fault.effect, event_id),
+                            )
                 reply = gateway.call(decision.tool, decision.arguments)
             elif isinstance(decision, AwaitReview):
                 due = [
