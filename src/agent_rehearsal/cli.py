@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -15,12 +16,14 @@ from agent_rehearsal.controller import ADAPTER
 from agent_rehearsal.evaluator import evaluate_run
 from agent_rehearsal.evidence import verify_ledger
 from agent_rehearsal.playback import load_playback, render, verify_against_report
+from agent_rehearsal.recovery import CRASH_POINTS
 from agent_rehearsal.report import load_report
 from agent_rehearsal.runner import (
     DB_NAME,
     REPORT_NAME,
     OutputDirectoryNotEmpty,
     execute_run,
+    resume_run,
 )
 from agent_rehearsal.scenarios import (
     DEFAULT_SCENARIOS_DIR,
@@ -68,7 +71,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     try:
         if output.exists() and (not output.is_dir() or any(output.iterdir())):
             raise OutputDirectoryNotEmpty(f"refusing to write into nonempty path: {output}")
-        result = execute_run(scenario, args.seed, output)
+        result = execute_run(scenario, args.seed, output, crash_at=args.crash_at)
     except OutputDirectoryNotEmpty as exc:
         return _err(str(exc))
     report = result.report
@@ -88,6 +91,17 @@ def cmd_run(args: argparse.Namespace) -> int:
     if report["execution_status"] == "error":
         return EXIT_INVALID
     return VERDICT_EXIT[report["verdict"]]
+
+
+def cmd_resume(args: argparse.Namespace) -> int:
+    try:
+        result = resume_run(args.run_dir)
+    except (OSError, ValueError, KeyError, sqlite3.Error) as exc:
+        return _err(str(exc))
+    print(f"Controller: {result.report['adapter']['label']}")
+    print(f"Business outcome: {result.report['business_outcome']}")
+    print(f"Evaluation verdict: {result.evaluation.verdict}")
+    return VERDICT_EXIT[result.evaluation.verdict]
 
 
 def cmd_replay(args: argparse.Namespace) -> int:
@@ -190,7 +204,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--seed", type=int, required=True)
     run.add_argument("--output", type=Path, required=True)
     run.add_argument("--scenarios-dir", type=Path, default=DEFAULT_SCENARIOS_DIR)
+    run.add_argument("--crash-at", choices=CRASH_POINTS)
     run.set_defaults(func=cmd_run)
+    resume = sub.add_parser("resume", help="recover an interrupted local run")
+    resume.add_argument("--run-dir", type=Path, required=True)
+    resume.set_defaults(func=cmd_resume)
 
     rep = sub.add_parser("replay", help="recorded playback of a finished run")
     rep.add_argument("--run-dir", type=Path, required=True)

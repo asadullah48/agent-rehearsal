@@ -24,11 +24,18 @@ from agent_rehearsal.controller import (
 )
 from agent_rehearsal.evaluator import Evaluation, evaluate_run
 from agent_rehearsal.evidence import export_bundle
-from agent_rehearsal.models import Actor, ToolError
+from agent_rehearsal.models import Actor, ToolResult
 from agent_rehearsal.policy import KNOWN_POLICIES
 from agent_rehearsal.privileged import ReviewerConsole, ScenarioConsole
-from agent_rehearsal.report import build_report, write_report
-from agent_rehearsal.scenarios import Scenario
+from agent_rehearsal.recovery import (
+    DecisionJournal,
+    crash_if,
+    sync_ledger,
+    unknown_response,
+    validate_recovery_evidence,
+)
+from agent_rehearsal.report import build_report, load_report, write_report
+from agent_rehearsal.scenarios import Scenario, parse_scenario
 from agent_rehearsal.store import HARNESS, Store
 from agent_rehearsal.tools import ToolGateway
 
@@ -57,7 +64,9 @@ def prepare_output_dir(output: Path) -> None:
     output.mkdir(parents=True, exist_ok=True)
 
 
-def execute_run(scenario: Scenario, seed: int, output: Path) -> RunResult:
+def execute_run(
+    scenario: Scenario, seed: int, output: Path, *, crash_at: str | None = None
+) -> RunResult:
     """Run an already validated scenario. Callers must validate input first."""
     wall_start = time.perf_counter()
     prepare_output_dir(output)
@@ -70,9 +79,15 @@ def execute_run(scenario: Scenario, seed: int, output: Path) -> RunResult:
         seed=seed,
         adapter=ADAPTER,
     )
+    sync_ledger(store)
     try:
         _drive(
-            store, scenario, seed, policy.max_proposed_actions, policy.max_attempts_per_operation
+            store,
+            scenario,
+            seed,
+            policy.max_proposed_actions,
+            policy.max_attempts_per_operation,
+            crash_at=crash_at,
         )
     finally:
         store.close()
@@ -85,8 +100,43 @@ def execute_run(scenario: Scenario, seed: int, output: Path) -> RunResult:
     return RunResult(output, evaluation, report)
 
 
+def resume_run(output: Path) -> RunResult:
+    store = Store.open_existing(output / DB_NAME)
+    try:
+        validate_recovery_evidence(store)
+        scenario = parse_scenario(store.meta("scenario_json"))
+        seed = int(store.meta("seed"))
+        policy = KNOWN_POLICIES[scenario.policy_version]
+        if store.meta("execution_status") == "running":
+            _drive(
+                store,
+                scenario,
+                seed,
+                policy.max_proposed_actions,
+                policy.max_attempts_per_operation,
+                resuming=True,
+            )
+    finally:
+        store.close()
+    evaluation = evaluate_run(output / DB_NAME)
+    report = build_report(output / DB_NAME, evaluation, wall_clock_ms=0)
+    if (output / REPORT_NAME).exists():
+        report = load_report(output / REPORT_NAME)
+    else:
+        write_report(output / REPORT_NAME, report)
+    export_bundle(output, report)
+    return RunResult(output, evaluation, report)
+
+
 def _drive(
-    store: Store, scenario: Scenario, seed: int, max_actions: int, max_attempts: int
+    store: Store,
+    scenario: Scenario,
+    seed: int,
+    max_actions: int,
+    max_attempts: int,
+    *,
+    crash_at: str | None = None,
+    resuming: bool = False,
 ) -> None:
     gateway = ToolGateway(store, CONTROLLER_ACTOR)
     consoles = {
@@ -100,13 +150,14 @@ def _drive(
         max_attempts_per_operation=max_attempts,
         duplicate_po_attempt=scenario.duplicate_po_attempt,
     )
-    journaled = 0
+    journaled = len(store.rows("SELECT * FROM workflow_transitions"))
+    decisions = DecisionJournal(store)
 
     def journal() -> None:
         nonlocal journaled
         for t in controller.transitions[journaled:]:
             store.record_transition(t.from_state.value, t.to_state.value, t.reason)
-        journaled = len(controller.transitions)
+        journaled = max(journaled, len(controller.transitions))
 
     proposals = 0
     purchase_occurrence = 0
@@ -124,8 +175,14 @@ def _drive(
                 )
                 return
             journal()
+            saved, recovering = decisions.begin(decision)
             if isinstance(decision, ToolProposal):
                 proposals += 1
+                if decision.tool == "create_purchase_order":
+                    purchase_occurrence += 1
+                if saved["reply_json"] is not None:
+                    reply = ToolResult.model_validate_json(saved["reply_json"])
+                    continue
                 if proposals > max_actions:
                     drive.close()
                     store.finish_run(
@@ -136,7 +193,6 @@ def _drive(
                     )
                     return
                 if decision.tool == "create_purchase_order":
-                    purchase_occurrence += 1
                     for fault in scenario.faults:
                         if fault.boundary != "before_purchase":
                             continue
@@ -166,7 +222,37 @@ def _drive(
                                 "INSERT INTO fault_firings VALUES (?, ?, ?, ?)",
                                 (fault.id, purchase_occurrence, fault.effect, event_id),
                             )
-                reply = gateway.call(decision.tool, decision.arguments)
+                if decision.tool == "reserve_budget":
+                    crash_if(crash_at, "before-reservation")
+                if decision.tool == "create_purchase_order":
+                    crash_if(crash_at, "before-purchase")
+                previous = (
+                    store.rows(
+                        "SELECT * FROM tool_calls WHERE seq >= ? AND tool = ? "
+                        "AND arguments_json = ? ORDER BY seq",
+                        (saved["cursor"], decision.tool, canonical_json(decision.arguments)),
+                    )
+                    if recovering
+                    else []
+                )
+                if recovering and decision.tool == "create_purchase_order" and not previous:
+                    intent = f"PI-{decision.arguments['request_id']}"
+                    found = gateway.call(
+                        "get_purchase_order_by_intent", {"logical_intent_id": intent}
+                    )
+                    if found.status == "ok":
+                        raise ValueError(
+                            "purchase exists without its recorded call; manual review required"
+                        )
+                    if found.error is None or found.error.reason_code != "PURCHASE_ORDER_NOT_FOUND":
+                        raise ValueError("recovery lookup unresolved; purchase not retried")
+                reply = (
+                    ToolResult.model_validate_json(previous[0]["response_json"])
+                    if previous
+                    else gateway.call(decision.tool, decision.arguments)
+                )
+                if decision.tool == "create_purchase_order" and reply.status == "ok":
+                    crash_if(crash_at, "after-purchase-commit")
                 if decision.tool == "create_purchase_order" and reply.status == "ok":
                     for fault in scenario.faults:
                         if (
@@ -178,34 +264,21 @@ def _drive(
                             "SELECT * FROM fault_firings WHERE fault_id = ?", (fault.id,)
                         ):
                             continue
-                        reply = reply.model_copy(
-                            update={
-                                "status": "error",
-                                "data": None,
-                                "error": ToolError(
-                                    code="OUTCOME_UNKNOWN",
-                                    reason_code="OUTCOME_UNKNOWN",
-                                    message="purchase response lost after commit",
-                                    certainty="unknown",
-                                ),
-                                "event_ids": [],
-                            }
-                        )
+                        reply, event_id = unknown_response(store, reply, fault.id)
                         with store.transaction() as tx:
-                            event_id = tx.add_event(
-                                HARNESS,
-                                "response.lost",
-                                {"call_id": reply.call_id, "fault_id": fault.id},
-                            )
                             tx.execute(
                                 "INSERT INTO fault_firings VALUES (?, ?, ?, ?)",
                                 (fault.id, purchase_occurrence, fault.effect, event_id),
                             )
-                            tx.execute(
-                                "UPDATE tool_calls SET status = 'error', response_json = ? "
-                                "WHERE call_id = ?",
-                                (canonical_json(reply.model_dump(mode="json")), reply.call_id),
-                            )
+                if previous and decision.tool == "create_purchase_order" and reply.status == "ok":
+                    reply, _ = unknown_response(store, reply, "process-crash-recovery")
+                decisions.complete(reply)
+                if decision.tool == "reserve_budget":
+                    crash_if(crash_at, "after-reservation")
+                if decision.tool == "get_approval" and reply.status == "ok":
+                    crash_if(crash_at, "after-approval")
+                if decision.tool == "create_purchase_order":
+                    crash_if(crash_at, "after-purchase-response")
             elif isinstance(decision, AwaitReview):
                 due = [
                     a
@@ -222,11 +295,28 @@ def _drive(
                     return
                 action = due[0]
                 pending.remove(action)
-                consoles[action.reviewer_id].grant_approval(action.request_id, action.ttl_seconds)
+                if saved["reply_json"] is not None:
+                    reply = None
+                    continue
+                grants = (
+                    store.rows(
+                        "SELECT * FROM events WHERE seq >= ? AND event_type='approval.granted'",
+                        (saved["cursor"],),
+                    )
+                    if recovering
+                    else []
+                )
+                if not grants:
+                    consoles[action.reviewer_id].grant_approval(
+                        action.request_id, action.ttl_seconds
+                    )
                 reply = None
+                decisions.complete(reply)
             else:  # pragma: no cover - defensive
                 raise TypeError(f"unknown controller decision {decision!r}")
     except Exception as exc:
+        if resuming:
+            raise
         # A broken harness must still leave evidence; the evaluator then reports at
         # best "inconclusive" because execution_status is "error".
         drive.close()
