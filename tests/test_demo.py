@@ -30,7 +30,11 @@ def test_demo_real_runs_private_and_relative(tmp_path: Path):
         assert "fetch(" not in html
         for href in re.findall(r'href="([^"]+)"', html):
             assert not href.startswith(("/", "http:", "https:", "file:"))
-            assert (output / href).exists()
+            target, _, fragment = href.partition("#")
+            linked = output / target if target else page
+            assert linked.exists()
+            if fragment:
+                assert f'id="{fragment}"' in linked.read_text(encoding="utf-8")
     for run in (output / "runs").iterdir():
         expected = "fail" if run.name == "false-success" else "pass"
         assert evaluate_run(run / "run.sqlite").verdict == expected
