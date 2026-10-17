@@ -1,3 +1,5 @@
+import pytest
+
 from agent_rehearsal.runner import execute_run
 from agent_rehearsal.scenarios import load_scenario
 
@@ -80,3 +82,45 @@ def test_missing_revocation_is_detected(tmp_path, monkeypatch):
     monkeypatch.setattr(ReviewerConsole, "revoke_approval", lambda *args: "missing-event")
     result = execute_run(load_scenario("approval-revoked"), 42, tmp_path / "missing")
     assert result.evaluation.verdict == "fail"
+
+
+@pytest.mark.parametrize(
+    "scenario_id", ["duplicate-po", "response-lost", "approval-revoked", "supplier-changed"]
+)
+def test_disruption_reruns_are_deterministic(tmp_path, scenario_id):
+    from agent_rehearsal.report import canonical_semantic_trace
+
+    scenario = load_scenario(scenario_id)
+    a = execute_run(scenario, 42, tmp_path / "a").report
+    b = execute_run(scenario, 42, tmp_path / "b").report
+    assert canonical_semantic_trace(a) == canonical_semantic_trace(b)
+
+
+@pytest.mark.parametrize(
+    "bad_tool", ["release_reservation", "create_purchase_order", "wrong_intent"]
+)
+def test_reconciliation_rejects_unsafe_next_action(tmp_path, bad_tool):
+    import json
+    import sqlite3
+
+    from agent_rehearsal.evaluator import evaluate_run
+
+    result = execute_run(load_scenario("response-lost"), 42, tmp_path / "lost")
+    with sqlite3.connect(result.run_dir / "run.sqlite") as conn:
+        if bad_tool == "wrong_intent":
+            conn.execute(
+                "UPDATE tool_calls SET arguments_json = ? "
+                "WHERE tool = 'get_purchase_order_by_intent'",
+                (json.dumps({"logical_intent_id": "PI-OTHER"}),),
+            )
+        else:
+            conn.execute(
+                "UPDATE tool_calls SET tool = ? WHERE tool = 'get_purchase_order_by_intent'",
+                (bad_tool,),
+            )
+    check = next(
+        a
+        for a in evaluate_run(result.run_dir / "run.sqlite").assertions
+        if a.id == "unknown_outcome_reconciled"
+    )
+    assert check.status == "fail"

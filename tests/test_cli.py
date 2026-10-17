@@ -165,3 +165,14 @@ def test_source_has_no_network_credential_or_env_access():
         for m in forbidden.finditer(p.read_text(encoding="utf-8"))
     ]
     assert hits == []
+
+
+@pytest.mark.parametrize(
+    "scenario_id",
+    ["happy-path", "duplicate-po", "response-lost", "approval-revoked", "supplier-changed"],
+)
+def test_session2_cli_happy_paths(tmp_path, scenario_id):
+    output = tmp_path / scenario_id
+    assert main(["run", "--scenario", scenario_id, "--seed", "42", "--output", str(output)]) == 0
+    for command in ("replay", "evaluate", "verify"):
+        assert main([command, "--run-dir", str(output)]) == 0

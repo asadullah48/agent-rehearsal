@@ -4,7 +4,7 @@ An offline simulator and independent evaluator that checks whether a tool-using
 controller preserves **approval**, **idempotency** and **budget** invariants in a
 fictional procurement workflow.
 
-> **Status: Session 1 (offline kernel).** The only controller is a
+> **Status: Session 2 (offline disruptions and evidence).** The only controller is a
 > **deterministic reference controller**: a fixed, seeded state machine. It is
 > **not an AI agent** and makes **no model calls**. Nothing in this repository
 > shows how any live LLM agent behaves.
@@ -35,7 +35,7 @@ these assertions from world tables and the ordered event log:
 | `reservation_state_consistent` | Created once, terminal at most once, and PO linkage matches state |
 | `all_mutations_have_events` | Every persisted mutation is explained by an event and a committed tool call |
 | `expected_business_outcome` | The world-derived outcome matches the scenario, and the controller's claim matches the world |
-| `unknown_outcome_reconciled` | `not_applicable` unless a tool outcome was ambiguous (Session 2) |
+| `unknown_outcome_reconciled` | Checks intent lookup against authoritative state before retry/release; otherwise `not_applicable` |
 
 Three results are reported separately and never merged into a single score:
 **execution status** (`running`/`paused`/`completed`/`error`), **business
@@ -70,7 +70,8 @@ python -m agent_rehearsal replay --run-dir .rehearsal/demo/happy
 python -m agent_rehearsal evaluate --run-dir .rehearsal/demo/happy
 ```
 
-- `run` refuses a nonempty output directory. It writes `run.sqlite` and `report.json`.
+- `run` refuses a nonempty output directory. It writes the SQLite database, report,
+  event ledger, local anchor, Markdown summary and SHA-256 file manifest.
 - `replay` is **recorded playback**. It renders the saved tool calls, recorded
   responses, events and state transitions in their original order, then
   cross-checks them against `report.json`. It invokes no tool, controller or
@@ -158,32 +159,50 @@ python -m pytest
 python -m ruff check . && python -m ruff format --check .
 ```
 
-Session 1 result: **87 tests passed**. Tests and scenarios are counted
-separately. There is **one scenario** (S01 `happy-path`). The edge cases are
-direct tool-boundary and evaluator tests, not scenarios: missing, expired,
-revoked or impersonated approval; inactive supplier; insufficient funds;
-idempotency; and evaluator negative controls. An autouse fixture makes network
-connections and `.env` reads raise during tests.
+Session 2 result: **114 tests passed** (baseline: 87). There are **five scenario
+files**, counted separately from tests:
+
+| Scenario | Expected behavior |
+| --- | --- |
+| S01 `happy-path` | One approved PO; reservation consumed |
+| S02 `response-lost` | Purchase commits; lost response reconciled by intent lookup; no retry/double spend |
+| S03 `approval-revoked` | Reviewer withdraws observed approval; commit denied; reservation released |
+| S04 `supplier-changed` | Supplier suspended after recheck; commit denied; reservation released |
+| S11 `duplicate-po` | Deliberate second attempt with fresh key blocked and reported by evaluator |
+
+The deterministic controller deliberately proposes the second PO in S11 as a
+negative-control exercise. Its gateway blocks the attempt; the evaluator reports
+blocked attempts separately from actual duplicate purchases. It is a passing
+scenario when protection works. Tests also corrupt or suppress evidence to prove
+that evaluation fails; these helpers are test-only.
+
+Faults are allowlisted JSON data with stable IDs, semantic boundaries, occurrence
+indices and a maximum firing count of one. Firings are persisted in SQLite and
+hidden from controller observations. Only supplier suspension, approval revocation
+and post-commit response loss are supported. No wall-clock sleeps control faults.
+
+All five scenarios have CLI run/playback/evaluate/verify checks; all four new
+scenarios have same-seed semantic-trace checks. An autouse fixture rejects network
+connections and `.env` reads. No runtime or development dependencies were added.
 
 ## Limits / non-goals
 
-- **No live AI agent.** Passing S01 shows only that this harness and its
-  deterministic controller behave as specified on one synthetic fixture. It says
+- **No live AI agent.** Passing these scenarios shows only that this harness and its
+  deterministic controller behave as specified on the shipped synthetic fixtures. It says
   nothing about how an LLM agent would behave, and it does not show that unseen
   cases are safe.
-- **Session 1 scope only.** There is no disruption engine yet. The three core
-  disruptions (supplier ineligible, lost purchase response, approval revoked
-  before commit) are Session 2 work. There is also no frontend, API server, MCP
-  adapter, decision forks, authentication, billing, deployment or external
-  integration.
+- **Bounded Session 2 scope.** The three core disruptions and local evidence
+  bundle work. There is no frontend, API server, MCP adapter, decision forks,
+  authentication, billing, deployment or external integration. Expiry, policy
+  changes, failed compensation and process-crash scenarios remain backlog.
 - **Not durable execution.** Runs are synchronous and in-process. Process
   restart/resume is not implemented or tested. Playback reads saved evidence only.
 - **Local guarantees only.** Atomicity and idempotency rely on one local SQLite
   file. Real connectors would need to declare their own guarantees.
-- **Evidence integrity.** `report.json` hashes describe inputs. They do not detect
-  an attacker who rewrites both data and hashes. Hash-chained evidence is planned
-  for Session 2, and it will be tamper-evident relative to a trusted digest, not
-  tamper-proof.
+- **Evidence integrity.** The event chain is tamper-evident (not tamper-proof)
+  relative to a separately retained digest. A local anchor and manifest are writable
+  by the same file owner. `verify` checks only the exported ledger. Bundle export
+  happens at run completion; interrupted export/resume is not implemented.
 - **English only.** Arabic is planned, not supported. It will come only after a
   competent reviewer verifies content and behaviour.
 - **No real purchasing, payments, legal interpretation, or government system
@@ -191,4 +210,4 @@ connections and `.env` reads raise during tests.
 - **License.** No license has been chosen yet. All rights are reserved by the
   owner until one is added.
 
-See `docs/ADR-001-OFFLINE-KERNEL.md` and `docs/SESSION-1-CHECKPOINT.md`.
+See `docs/ADR-001-OFFLINE-KERNEL.md` and `docs/SESSION-2-CHECKPOINT.md`.
