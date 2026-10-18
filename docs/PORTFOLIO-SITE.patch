@@ -1,5 +1,5 @@
 diff --git a/src/components/Projects.tsx b/src/components/Projects.tsx
-index a8482b4..e1aef62 100644
+index a8482b4..60551c9 100644
 --- a/src/components/Projects.tsx
 +++ b/src/components/Projects.tsx
 @@ -124,0 +125,16 @@ const PROJECTS_EN: Project[] = [
@@ -19,3 +19,16 @@ index a8482b4..e1aef62 100644
 +      { label: "Model calls", value: "0" },
 +    ],
 +  },
+@@ -1990,0 +2007,12 @@ export function ProjectsSection() {
++                {project.demo && (
++                  <a
++                    href={project.demo}
++                    target="_blank"
++                    rel="noopener noreferrer"
++                    aria-label={`${labels.viewDemo}: ${project.title}`}
++                    className="inline-flex items-center gap-1 font-mono text-xs text-brand-soft transition-colors hover:text-brand"
++                  >
++                    <ExternalLink className="h-3 w-3" aria-hidden="true" />
++                    {labels.viewDemo}
++                  </a>
++                )}
