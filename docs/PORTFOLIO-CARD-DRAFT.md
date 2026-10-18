@@ -1,6 +1,45 @@
 # Agent Rehearsal — private portfolio card draft
 
-Unpublished draft. Repository stays private; publication is not authorized.
+Unpublished draft. Repository stays private until the owner changes visibility
+manually. Source, Pages workflow and portfolio changes are prepared for review;
+no merge, Pages enablement or portfolio deployment is authorized at this stage.
+
+## Reviewed card copy (2026-10-18)
+
+**Agent Rehearsal — Offline Controller Evaluation**
+
+Offline procurement simulator and independent evaluator for approval,
+idempotency and budget invariants. A static viewer presents seven recorded
+runs across five synthetic fixtures, including a false-success claim caught
+by the evaluator. Deterministic and scripted controllers make zero model calls.
+
+Evidence: 169 tests at the Session 4 checkpoint; merged-main GitHub Actions
+[run 39023220546](https://github.com/asadullah48/agent-rehearsal/actions/runs/39023220546)
+passed for `381d5ed`. Local SQLite recovery is exercised at six workflow and
+seven export crash boundaries. These are bounded synthetic exercises, not
+production reliability or live-agent safety evidence.
+
+Portfolio status: Reference; synthetic data. Prepared destination links:
+
+- Source: https://github.com/asadullah48/agent-rehearsal
+- Recorded demo: https://asadullah48.github.io/agent-rehearsal/
+
+These links are intended for the future publication; do not deploy the card until
+the owner makes the source public and the first Pages deploy is verified.
+Stack: Python, SQLite, Pydantic, pytest, static HTML, GitHub Actions.
+
+## Publication recommendation
+
+Recommend making the repository public and hosting only the generated static
+viewer with its seven original synthetic evidence bundles. Keep the no-model,
+fictional-data and tamper-evident limitations visible. The previous proprietary
+license has been replaced by the owner's requested MIT license in this branch.
+
+Prepared hosting: GitHub Pages, publishing the generated output directory rather
+than the repository root. **Unverified until first Pages deploy.** No visibility,
+deployment, Pages enablement or domain changes were made here.
+
+## Claim evidence
 
 Every proposed card claim below is paired with its evidence. Counts describe
 local synthetic exercises, never real customers or production reliability.

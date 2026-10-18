@@ -307,7 +307,7 @@ Create a standalone `agent-rehearsal` repository or work within an explicitly id
 Suggested layout:
 
 ```text
-SPEC-AGENT-REHEARSAL.md
+docs/SPEC-AGENT-REHEARSAL.md
 README.md
 pyproject.toml
 .gitignore
