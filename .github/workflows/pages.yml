@@ -1,0 +1,55 @@
+name: Static recorded demo (Pages)
+
+# Prepared only: unverified until first Pages deploy.
+# Owner must make the repo public and enable Pages / GitHub Actions before merge.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install existing development extras
+        run: python -m pip install -e ".[dev]"
+      - name: Validate source
+        run: |
+          python -m pytest -o "addopts="
+          python -m ruff check .
+          python -m ruff format --check .
+      - name: Generate recorded viewer and evidence bundles
+        run: python -m agent_rehearsal.demo --output .rehearsal/pages
+      - name: Configure Pages (must already be enabled by owner)
+        uses: actions/configure-pages@v5
+        with:
+          enablement: false
+      - name: Upload only generated site
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: .rehearsal/pages
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy generated site
+        id: deployment
+        uses: actions/deploy-pages@v4

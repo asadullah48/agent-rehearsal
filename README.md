@@ -5,9 +5,12 @@ controller preserves **approval**, **idempotency** and **budget** invariants in 
 fictional procurement workflow.
 
 > **Status: Session 4 (static recorded demo; local recovery and offline controllers).**
-> Two offline controllers ship: a **deterministic reference controller** and a
+> Two offline controllers ship: a **deterministic reference controller (not an AI agent)** and a
 > **scripted offline decision replay**. Both make **zero model calls**. Nothing
 > here demonstrates the behavior of a live LLM agent.
+>
+> Synthetic data only. Evidence is **tamper-evident (not tamper-proof)**;
+> retain a trusted digest outside the writable bundle. Licensed under [MIT](LICENSE).
 
 ## Synthetic data notice
 
@@ -248,7 +251,7 @@ python -m pytest
 python -m ruff check . && python -m ruff format --check .
 ```
 
-Session 3 result: **160 tests passed** (baseline: 114). There are **five scenario
+Session 4 result: **169 tests passed** (Session 3: 160; baseline: 114). There are **five scenario
 files**, counted separately from tests:
 
 | Scenario | Expected behavior |
@@ -280,7 +283,7 @@ connections and `.env` reads. No runtime or development dependencies were added.
   two offline controllers behave as specified on the shipped synthetic fixtures. It says
   nothing about how an LLM agent would behave, and it does not show that unseen
   cases are safe.
-- **Bounded Session 3 scope.** The three core disruptions and local evidence
+- **Bounded offline scope.** The three core disruptions and local evidence
   bundle work. There is no API server, MCP adapter, decision forks,
   authentication, billing, deployment or external integration. Expiry, policy
   changes, failed compensation remain backlog. Named local process-crash recovery is covered below.
@@ -300,8 +303,7 @@ connections and `.env` reads. No runtime or development dependencies were added.
   competent reviewer verifies content and behaviour.
 - **No real purchasing, payments, legal interpretation, or government system
   access**, now or as a goal.
-- **License.** No license has been chosen yet. All rights are reserved by the
-  owner until one is added.
+- **License.** [MIT](LICENSE); no warranty or compliance certification.
 
 See `docs/ADR-001-OFFLINE-KERNEL.md` and `docs/SESSION-3-CHECKPOINT.md`.
 
@@ -374,3 +376,12 @@ foreach ($entry in $expected.GetEnumerator()) {
 Independent verification commands, validation results and continuing limitations
 are in [Session 4 checkpoint](docs/SESSION-4-CHECKPOINT.md). The repository stays
 private and the [portfolio card](docs/PORTFOLIO-CARD-DRAFT.md) stays a draft.
+
+### Prepared GitHub Pages hosting
+
+`.github/workflows/pages.yml` builds this viewer from source on each push to
+`main` and uploads only the generated directory; generated files are never committed.
+The owner will make the repository public and enable Pages with GitHub Actions
+as its source before merging the workflow. **Unverified until first Pages deploy.**
+The intended URL is https://asadullah48.github.io/agent-rehearsal/.
+This is a recorded static demo; it does not run a controller in the browser.

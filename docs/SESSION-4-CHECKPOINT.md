@@ -1,5 +1,41 @@
 # Session 4 checkpoint
 
+## Merged-main status (2026-10-18)
+
+All four sessions are merged to `main` at
+`381d5ed3e9ddef95637b03cf3f5615435d7f28f8` (PR #3), tagged
+`session-4-complete`. Requested CI evidence, rechecked through the GitHub API:
+
+- Branch [39021939311](https://github.com/asadullah48/agent-rehearsal/actions/runs/39021939311):
+  success, `4a1ef8786c5aa9be8ff380ce749aead05850e5c4`.
+- Main [39023205471](https://github.com/asadullah48/agent-rehearsal/actions/runs/39023205471):
+  success, `381d5ed3e9ddef95637b03cf3f5615435d7f28f8`.
+
+The latest green main push run is
+[39023220546](https://github.com/asadullah48/agent-rehearsal/actions/runs/39023220546)
+(success for that exact commit, verified through the GitHub API on 2026-10-18).
+This supersedes the pre-follow-up run 39019867173 below; earlier branch-only,
+no-PR and no-merge statements are historical delivery constraints, not current status.
+Repository visibility is still PRIVATE. The prepared Pages workflow is
+**unverified until first Pages deploy**; no hosting was enabled. The owner will
+change visibility manually after reviewing the publication report.
+
+The review-loop corrections were F1/F2/F3 below plus documentation commit
+`4a1ef87`: seven runs/eight pages; explicit false-success FAIL versus expected
+refusal PASS; linked event evidence; and exact evaluate/verify/replay exit codes.
+The README's Session 4 demo section already describes these corrections. Its
+test summary has now been updated from the Session 3 baseline to 169 tests.
+
+Fresh 2026-10-18 validation: **169 passed in 300.48s** using the project venv
+with approved filesystem access; restricted attempts hit Windows temporary-path
+access errors. Ruff check, Ruff format and `git diff --check` pass. A fresh local
+demo at ignored `.rehearsal/publication-review-oct18/` contains eight HTML pages
+and seven evidence bundles (one intentional FAIL). Portfolio card added to the
+local English project list as Reference / synthetic data / source on request;
+`tsc --noEmit --incremental false` passes. This records the initial local review;
+publication-prep changes are now prepared separately on `feat/publication-prep`.
+No deployment performed.
+
 Date: 2026-10-17 (Asia/Karachi). Branch: `feat/session-4-demo`.
 Starting main: `d46b10e87303eb5261fd19e99705b26e29334314`.
 
@@ -248,5 +284,5 @@ if ($LASTEXITCODE -ne 0) { throw 'Format failed' }
 
 ## Next step
 
-Commit the final milestone, push only `feat/session-4-demo`, and report the actual
-push result. No PR, merge or publication. Review the generated viewer locally.
+The milestone is merged and tagged; see merged-main status above. Review the
+publication recommendation and portfolio copy in `PORTFOLIO-CARD-DRAFT.md`.

@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Offline simulator and independent evaluator for tool-using procurement controllers (synthetic data only)."
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "Proprietary - all rights reserved (no license granted yet)" }
+license = { file = "LICENSE" }
 dependencies = ["pydantic>=2.7,<3"]
 
 [project.optional-dependencies]
