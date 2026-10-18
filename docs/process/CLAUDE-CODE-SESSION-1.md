@@ -1,9 +1,9 @@
 # Agent Rehearsal — Claude Code Session 1
 
-`SPEC-AGENT-REHEARSAL.md` is already saved in `D:\agent-rehearsal`. Open that folder in VS Code, open the Claude Code panel, and paste the complete block below. The specification describes the roadmap; this prompt authorizes Session 1 only.
+Historical Session 1 execution prompt. The current specification is [SPEC-AGENT-REHEARSAL.md](../SPEC-AGENT-REHEARSAL.md). Open the repository root in VS Code, open the Claude Code panel, and paste the complete block below. The specification describes the roadmap; this prompt authorized Session 1 only.
 
 ```text
-Implement Session 1 of Agent Rehearsal. Read SPEC-AGENT-REHEARSAL.md fully first, especially Sections 4, 8–14, and 18–20. Use version 1.1 or later incorporating the four-session, English-first hiring-asset scope. Do the implementation and verification in this session; do not stop at a plan.
+Implement Session 1 of Agent Rehearsal. Read docs/SPEC-AGENT-REHEARSAL.md fully first, especially Sections 4, 8–14, and 18–20. Use version 1.1 or later incorporating the four-session, English-first hiring-asset scope. Do the implementation and verification in this session; do not stop at a plan.
 
 PURPOSE
 
@@ -17,7 +17,7 @@ Do not implement the disruption engine, frontend, API server, live LLM calls, MC
 
 WORKSPACE AND AUTHORIZATION
 
-0. KNOWN LAYOUT: The project folder is D:\agent-rehearsal. The drive root D:\ contains its own unrelated .git directory, so `git rev-parse --show-toplevel` may report D:\ before setup. That D:\ repository is NOT this project. Do not stop because of it, and never run git commands against it (no add, commit, reset, checkout, or config changes at D:\). Run `git init` inside D:\agent-rehearsal so this project has its own nested repository, confirm the repository root is now D:\agent-rehearsal, and then continue. Leave D:\.git and everything else on the D drive untouched.
+0. KNOWN LAYOUT: Work from the agent-rehearsal repository root. At initial setup, its parent drive root contained an unrelated .git directory. That parent repository is NOT this project. Never run Git mutation commands against the parent repository. If this project is not initialized, run `git init` inside the project folder, confirm `git rev-parse --show-toplevel` identifies this project, and continue. Leave the parent repository and all unrelated files untouched.
 1. Inspect cwd, repository root, git status, current branch, and applicable AGENTS.md before changing files. Summarize what you found. These explicit task instructions override conflicting repository conventions.
 2. Work only in the standalone agent-rehearsal project. If cwd belongs to the portfolio, CMT, ClaudeCertMastery, or another unrelated repository, stop and report the mismatch rather than placing this project inside it. If this is the correct standalone folder and it has no Git repository, initialize one locally.
 3. Preserve all unrelated work. Create or switch to feat/session-1-kernel only when safe. Never reset, clean, overwrite unrelated files, or change the default branch. If that branch already has work, inspect and continue it safely.

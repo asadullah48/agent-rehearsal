@@ -46,6 +46,23 @@ These are detector-based findings, not proof that arbitrary encodings or every
 possible personal identifier are absent. No history was rewritten. Moving or
 deleting a current file later would not remove its old contents from history.
 
+Current-file cleanup: the owner approved moving the prompt into `docs/process/`
+and the specification into `docs/`. Current tracked documentation now uses
+repo-relative links or portable project paths. The historical audit counts above
+remain findings about earlier commits; no existing commits were rewritten.
+`tests/test_repository_privacy.py` scans every tracked text file listed by
+`git ls-files`, ignoring URL contents and allowing local-path samples only in
+`tests/fixtures/privacy-paths.json`. Its regression first failed on nine existing
+documentation lines before cleanup, with each offending file and line reported.
+Cleanup validation: **171 tests passed in 195.67s**, with Ruff check and format
+check passing. The requested grep reports 24 lines: 15 HTTPS URL lines and nine
+allow-listed fixture lines, with no other matches. All existing Markdown HTTPS
+URLs are unchanged and the updated relative document links resolve.
+Two earlier full runs using workspace temporary directories each hit a Windows
+export-directory rename access error (170 passed, one failed). The isolated
+failing test passed; the final full run used pytest's normal OS temporary directory
+and passed all tests. Export behavior was not changed by this cleanup.
+
 ## Session 4 correction evidence
 
 | Commit | Correction | README / executable evidence |
@@ -96,13 +113,13 @@ Historical checkpoint statements about no license describe their delivery dates.
 ## Files needing editorial consideration
 
 All tracked paths were inventoried. The following planning, prompt, draft and
-historical files warrant review; no files were deleted or moved.
+historical files warrant review. The approved prompt and specification moves below are now applied; no files were deleted.
 
 | File | Why it could confuse a public reader | Recommendation |
 | --- | --- | --- |
-| `CLAUDE-CODE-SESSION-1.md` | Full assistant execution prompt, local drive-root precautions, hiring-asset framing; historical local paths | Move to `docs/history/` after approval and label historical; keep in history |
-| `SPEC-AGENT-REHEARSAL.md` | Original scope/roadmap includes deferred features, not all delivered functionality | Move to `docs/` after approval; retain roadmap versus shipped-feature distinction |
-| `docs/SESSION-1-CHECKPOINT.md` | Local paths, old counts, initial uncommitted state and no-remote restrictions | Keep as dated implementation evidence; consider a historical banner |
+| [process/CLAUDE-CODE-SESSION-1.md](process/CLAUDE-CODE-SESSION-1.md) | Historical assistant execution prompt and initial workspace precautions | Moved to `docs/process/` as approved; historical label added; current local paths replaced |
+| [SPEC-AGENT-REHEARSAL.md](SPEC-AGENT-REHEARSAL.md) | Original scope/roadmap includes deferred features, not all delivered functionality | Moved to `docs/` as approved; retain roadmap versus shipped-feature distinction |
+| `docs/SESSION-1-CHECKPOINT.md` | Old counts, initial uncommitted state and no-remote restrictions; current paths are now portable | Keep as dated implementation evidence; consider a historical banner |
 | `docs/SESSION-2-CHECKPOINT.md` | Old no-CI/no-license/no-crash-recovery statements and superseded next step | Keep as dated evidence; consider a historical banner |
 | `docs/SESSION-3-CHECKPOINT.md` | Old branch-only/no-merge next step and pre-viewer status | Keep as dated evidence; consider a historical banner |
 | `docs/SESSION-4-CHECKPOINT.md` | Long tooling/debugging narrative and old no-PR/no-merge restrictions | Keep; current merged-main header explicitly supersedes historical constraints |

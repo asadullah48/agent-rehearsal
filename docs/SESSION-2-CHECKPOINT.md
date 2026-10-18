@@ -5,7 +5,7 @@ Starting main revision: `4ef6aed`. Main was not changed.
 
 ## Done
 
-- Confirmed the Git root is `D:/agent-rehearsal` and the starting tree was clean.
+- Confirmed the Git root is this project folder and the starting tree was clean.
   Created the requested feature branch. No Git command targeted the parent repo.
 - Read the spec, Session 1 checkpoint and README. No repository AGENTS.md or
   CLAUDE.md was found. Applied the user's supplied instructions.

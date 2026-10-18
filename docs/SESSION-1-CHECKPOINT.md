@@ -1,14 +1,14 @@
 # Session 1 Checkpoint — Offline Kernel
 
 - Date: 2026-10-17
-- Branch: `feat/session-1-kernel`. This is a nested repository at `D:\agent-rehearsal` with no commits yet, so the diff is uncommitted and ready for review.
-- Spec: `SPEC-AGENT-REHEARSAL.md` v1.1
+- Branch: `feat/session-1-kernel`. This is a nested repository in the project folder with no commits yet, so the diff is uncommitted and ready for review.
+- Spec: [SPEC-AGENT-REHEARSAL.md](SPEC-AGENT-REHEARSAL.md) v1.1
 - Controller: **deterministic reference controller** (not an AI agent; no model calls)
 
 ## Workspace facts at start
 
-- `D:\agent-rehearsal` contained only the two specification documents, with no `.git`, no `AGENTS.md`, and no existing test suite. **There was no baseline test count.**
-- `git rev-parse --show-toplevel` reported `D:/`, which is the unrelated drive-root repository. No git command was run against it. `git init` was run inside `D:\agent-rehearsal`. The repository root then reported as `D:/agent-rehearsal`, and the branch `feat/session-1-kernel` was created.
+- The project folder contained only the two specification documents, with no `.git`, no `AGENTS.md`, and no existing test suite. **There was no baseline test count.**
+- `git rev-parse --show-toplevel` initially identified the unrelated parent drive-root repository. No git command was run against it. `git init` was run inside this project folder. The repository root then identified this project, and the branch `feat/session-1-kernel` was created.
 
 ## Implemented scope
 
@@ -105,8 +105,8 @@ Gate G1 (Spec §18) evidence is listed above. G2–G4 have not started.
 
 ## Local data location
 
-- Demo run: `D:\agent-rehearsal\.rehearsal\demo\happy\run.sqlite` and `report.json`.
-- `D:\agent-rehearsal\.rehearsal\replay-output.txt` holds the captured replay output.
+- Demo run: `.rehearsal/demo/happy/run.sqlite` and `report.json`.
+- `.rehearsal/replay-output.txt` holds the captured replay output.
 - Tests write only to pytest temporary directories.
 - During development, one smoke run was written under the Claude scratchpad temp directory, outside the repository.
 - `.rehearsal/` and `*.sqlite` are ignored by Git (confirmed with `git status --ignored`).

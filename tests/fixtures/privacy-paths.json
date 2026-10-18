@@ -1,0 +1,16 @@
+[
+  {"text": "D:\\agent-rehearsal\\docs\\example.md", "private": true},
+  {"text": "D:/agent-rehearsal/docs/example.md", "private": true},
+  {"text": "C:\\Users\\Asad\\notes.txt", "private": true},
+  {"text": "Users\\Asad", "private": true},
+  {"text": "Users/Asad", "private": true},
+  {"text": "users\\asad", "private": true},
+  {"text": "D:/", "private": true},
+  {"text": "D://private", "private": true},
+  {"text": "See https://example.com/ then D:/private", "private": true},
+  {"text": "https://github.com/asadullah48/agent-rehearsal", "private": false},
+  {"text": "https://example.com/C:/example", "private": false},
+  {"text": "docs/SESSION-4-CHECKPOINT.md", "private": false},
+  {"text": ".rehearsal/demo/report.json", "private": false},
+  {"text": "[A-Za-z]:[\\/]", "private": false}
+]

@@ -307,6 +307,10 @@ connections and `.env` reads. No runtime or development dependencies were added.
 
 See `docs/ADR-001-OFFLINE-KERNEL.md` and `docs/SESSION-3-CHECKPOINT.md`.
 
+The [specification and roadmap](docs/SPEC-AGENT-REHEARSAL.md) and
+[historical Session 1 prompt](docs/process/CLAUDE-CODE-SESSION-1.md) document the
+original scope and process; the feature descriptions above reflect shipped behavior.
+
 ## Static recorded demo (Session 4)
 
 Generate and open a read-only local viewer in PowerShell (use a fresh output directory):

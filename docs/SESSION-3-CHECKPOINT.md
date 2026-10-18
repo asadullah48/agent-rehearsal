@@ -5,7 +5,7 @@ Starting main: `b57b866`, matching the local `session-2-complete` tag.
 
 ## Done
 
-- Confirmed Git root `D:/agent-rehearsal`, starting clean tree, and requested main
+- Confirmed Git root identifies this project folder, starting clean tree, and requested main
   revision. Created the feature branch; no Git operation targeted the parent repo.
 - Read README, Session 2 checkpoint, supplied instructions and relevant source.
   No repository AGENTS.md or CLAUDE.md was found. Used the TDD skill and observed
