@@ -116,7 +116,7 @@ def render_case(slug: str, report: dict, summary: str) -> str:
     for call in blocked:
         reason = call["response"]["error"]["reason_code"]
         body += (
-            f"<details open><summary>BLOCKED: {escape(call['call_id'])} - "
+            f"<details><summary>BLOCKED: {escape(call['call_id'])} - "
             f"{escape(reason)}</summary><pre>{_json(call)}</pre></details>"
         )
     if not blocked:
@@ -129,14 +129,17 @@ def render_case(slug: str, report: dict, summary: str) -> str:
             for ref in assertion["evidence_event_ids"]
         )
         body += f"<p>Evidence events: {refs or 'None recorded'}</p>"
-        body += f"<pre>{_json(assertion)}</pre></article>"
+        body += (
+            f"<details><summary>Assertion JSON</summary><pre>{_json(assertion)}</pre>"
+            "</details></article>"
+        )
     body += (
         '</section><section aria-labelledby="timeline">'
         '<h2 id="timeline">Recorded event timeline</h2><ol>'
     )
     for event in report["events"]:
         body += (
-            f'<li id="event-{escape(event["event_id"])}"><details open><summary>'
+            f'<li id="event-{escape(event["event_id"])}"><details><summary>'
             f"{escape(event['event_id'])}: {escape(event['event_type'])} - "
             f"{escape(event['simulated_at'])}</summary><pre>{_json(event)}</pre></details></li>"
         )
@@ -164,6 +167,9 @@ def render_case(slug: str, report: dict, summary: str) -> str:
 
 def render_index(cases: list[tuple[str, dict, str]]) -> str:
     body = (
+        '<p class="notice">Seven recorded runs, five synthetic fixtures, zero model calls. '
+        "See the evaluator catch a false success claim, then explore correct refusals "
+        "and recovery from disruptions.</p>"
         "<p>Offline procurement rehearsal - synthetic fixtures - seed 42.</p>"
         "<p>deterministic reference controller (not an AI agent).</p>"
         f"<p>Scripted cases use a {SCRIPTED_LABEL}.</p>"
@@ -172,8 +178,8 @@ def render_index(cases: list[tuple[str, dict, str]]) -> str:
         "Expected refusal with PASS is different from evaluation FAIL.</p>"
     )
     for scripted, heading in (
-        (False, "Controller handles disruptions"),
         (True, "Evaluator catches a bad agent"),
+        (False, "Controller handles disruptions"),
     ):
         body += f'<section><h2>{heading}</h2><div class="cards">'
         for slug, report, summary in cases:

@@ -127,7 +127,8 @@ def test_demo_every_evidence_link_resolves_to_saved_event(viewer):
             assert link.attrs["href"] == f"#event-{link.text}"
             (target,) = page.find("li", id=link.attrs["href"][1:])
             (detail,) = target.find("details")
-            assert "open" in detail.attrs
+            assert "open" not in detail.attrs
+            assert link.text in detail.find("summary")[0].text
 
 
 def test_demo_escapes_unsafe_fixture_text(tmp_path, monkeypatch):
@@ -177,10 +178,25 @@ def test_demo_false_success_fail_badge_differs_from_expected_refusal(viewer):
     for slug in ("approval-revoked", "supplier-changed", "stale-approval"):
         assert field_text(pages[slug], "Evaluation verdict") == "PASS"
         assert "Expected refusal - evaluation PASS" in pages[slug].text
-    for heading in ("Controller handles disruptions", "Evaluator catches a bad agent"):
-        assert heading in [h.text for h in pages["index"].find("h2")]
+    assert [h.text for h in pages["index"].find("h2")] == [
+        "Evaluator catches a bad agent",
+        "Controller handles disruptions",
+    ]
     # Assertion-level NOT_APPLICABLE remains explicit, never silently shown as PASS.
     assert any(s.text == "NOT_APPLICABLE" for p in pages.values() for s in p.find("span"))
+
+
+def test_demo_summary_and_collapsed_json(viewer):
+    _, _, pages = viewer
+    (main,) = pages["index"].find("main")
+    assert main.children[0].text.startswith("Seven recorded runs, five synthetic fixtures")
+    for slug, page in pages.items():
+        if slug == "index":
+            continue
+        assert page.find("pre")
+        assert not any("open" in detail.attrs for detail in page.find("details"))
+        nested = [pre for detail in page.find("details") for pre in detail.find("pre")]
+        assert nested == page.find("pre")
 
 
 def test_demo_all_pages_have_accessible_structure(viewer):
