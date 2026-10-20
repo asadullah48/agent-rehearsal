@@ -425,6 +425,82 @@ def test_live_eval_default_is_estimate_only(tmp_path, capsys):
     assert "no calls made" in capsys.readouterr().out
 
 
+SENTINEL_KEY = "sentinel-offline-key-never-printed"
+
+
+def approved_args(tmp_path):
+    return [
+        "live-eval",
+        "--trials",
+        "1",
+        "--budget-usd",
+        "0.5",
+        "--approved",
+        "--output",
+        str(tmp_path / "output"),
+        "--ledger",
+        str(tmp_path / "ledger.sqlite"),
+    ]
+
+
+def fake_sdk(monkeypatch, transport):
+    transport.close = lambda: None
+    monkeypatch.setattr("agent_rehearsal.live_eval.AnthropicTransport", lambda: transport)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", SENTINEL_KEY)
+
+
+def test_approved_live_eval_always_reports_progress_cost_and_path(tmp_path, monkeypatch, capsys):
+    fake_sdk(monkeypatch, RecordedTransport([finish("REFUSED"), finish("REFUSED")]))
+    code = main(approved_args(tmp_path))
+    out = capsys.readouterr().out
+    assert code == 1  # trials did not pass, so the run must not look successful
+    assert "start: APPROVED LIVE RUN" in out
+    assert "API key: set" in out
+    assert out.count(": reserved $") == 2
+    assert out.count(": settled, actual $") == 2
+    assert 'stop reasons: {"completed": 2}' in out
+    assert "cost: calls=2" in out
+    assert f"report: {(tmp_path / 'output' / 'live-report.json').resolve()}" in out
+    assert "exit: 1" in out
+    assert SENTINEL_KEY not in out
+
+
+def test_approved_live_eval_timeout_prints_stop_reason_and_fails(tmp_path, monkeypatch, capsys):
+    def transport(request):
+        raise TimeoutError()
+
+    fake_sdk(monkeypatch, transport)
+    code = main(approved_args(tmp_path))
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "stopped_uncertain, full reservation kept as spent" in out
+    assert "actual_complete=False" in out
+    assert SENTINEL_KEY not in out
+
+
+def test_approved_live_eval_without_key_refuses_loudly(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert main(approved_args(tmp_path)) == 2
+    out = capsys.readouterr().out
+    assert "API key: missing" in out
+    assert "refused: ANTHROPIC_API_KEY is missing" in out
+    assert not (tmp_path / "ledger.sqlite").exists()
+    assert not (tmp_path / "output").exists()
+
+
+def test_cli_module_entry_point_is_not_silent():
+    estimate_only = ["live-eval", "--trials", "1", "--budget-usd", "0.5"]
+    result = subprocess.run(
+        [sys.executable, "-m", "agent_rehearsal.cli", *estimate_only],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert "[live-eval] start: estimate only" in result.stdout
+    assert "no calls made" in result.stdout
+
+
 def test_repeated_report_preserves_failures_and_mock_label(tmp_path, price):
     transport = RecordedTransport([finish(), finish(), finish("REFUSED"), finish("REFUSED")])
     report = run_trials(2, "1", tmp_path / "eval", tmp_path / "ledger", price, transport=transport)

@@ -180,9 +180,11 @@ class DecisionService:
         pricing: Pricing | None = None,
         transport: Callable[[dict], dict] | None = None,
         replay_only: bool = False,
+        progress: Callable[[str], None] | None = None,
     ):
         self.store, self.ledger, self.pricing = store, ledger, pricing
         self.transport, self.replay_only = transport, replay_only
+        self.progress = progress or (lambda message: None)
 
     def _sync_cost(self) -> None:
         if self.ledger is not None:
@@ -194,6 +196,10 @@ class DecisionService:
     def _settle(self, call_id: str, actual: int | None, *, uncertain: bool = False) -> None:
         try:
             self.ledger.settle(call_id, actual, uncertain=uncertain)
+            self.progress(f"call {call_id}: settled, actual ${actual / 1e9:.6f}")
+        except LiveStop as exc:
+            self.progress(f"call {call_id}: {exc.reason}, full reservation kept as spent")
+            raise
         finally:
             self._sync_cost()
 
@@ -230,6 +236,7 @@ class DecisionService:
         reserved = self.pricing.cost(bound, MAX_OUTPUT)
         self.ledger.reserve(call_id, run_id, reserved, bound, MAX_OUTPUT)
         self._sync_cost()
+        self.progress(f"call {call_id}: reserved ${reserved / 1e9:.6f}, dispatching")
         try:
             response = self.transport(request)
         except Exception:

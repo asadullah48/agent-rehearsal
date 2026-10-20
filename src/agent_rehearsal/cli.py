@@ -260,3 +260,7 @@ def main(argv: list[str] | None = None) -> int:
     except SystemExit as exc:  # argparse uses 2 for usage errors, matching our contract
         return int(exc.code) if isinstance(exc.code, int) else EXIT_INVALID
     return int(args.func(args))
+
+
+if __name__ == "__main__":  # `python -m agent_rehearsal.cli` previously exited silently
+    raise SystemExit(main())

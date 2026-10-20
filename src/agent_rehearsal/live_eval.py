@@ -16,8 +16,8 @@ from agent_rehearsal.live import (
     DecisionService,
     LiveModelController,
 )
-from agent_rehearsal.live_budget import MODEL, BudgetLedger, Pricing, dollars
-from agent_rehearsal.live_transport import AnthropicTransport
+from agent_rehearsal.live_budget import MODEL, BudgetLedger, LiveStop, Pricing, dollars
+from agent_rehearsal.live_transport import AnthropicTransport, api_key_present
 from agent_rehearsal.report import PROJECT_ROOT, _source_revision
 from agent_rehearsal.runner import execute_run, prepare_output_dir
 from agent_rehearsal.scenarios import DEFAULT_SCENARIOS_DIR, load_scenario
@@ -196,7 +196,9 @@ def run_trials(
     pricing: Pricing,
     *,
     transport=None,
+    progress=None,
 ) -> dict:
+    progress = progress or (lambda message: None)
     plan = estimate(trials, pricing)
     cap = dollars(budget)
     prepare_output_dir(output)
@@ -215,6 +217,7 @@ def run_trials(
             scenario = load_scenario(scenario_id, directory)
             for trial in range(1, trials + 1):
                 relative = f"{scenario_id}-{trial:03d}"
+                progress(f"trial {scenario_id} #{trial}: starting")
                 ctrl = LiveModelController(
                     scenario.task.request_id,
                     "\n".join(s.name for s in scenario.initial_world.suppliers),
@@ -225,7 +228,7 @@ def run_trials(
                     output / relative,
                     controller=ctrl,
                     live_service_factory=lambda store: DecisionService(
-                        store, ledger=ledger, pricing=pricing, transport=client
+                        store, ledger=ledger, pricing=pricing, transport=client, progress=progress
                     ),
                 )
                 records.append(
@@ -235,6 +238,10 @@ def run_trials(
                         "evidence_directory": relative,
                         **trial_metrics(result.report),
                     }
+                )
+                progress(
+                    f"trial {scenario_id} #{trial}: stop={records[-1]['stop_reason']} "
+                    f"verdict={records[-1]['evaluation_verdict']}"
                 )
                 # Incremental results survive interruption of a later trial.
                 (output / "trials.json").write_text(
@@ -274,26 +281,59 @@ def run_trials(
             client.close()
 
 
+def _say(message: str) -> None:
+    print(f"[live-eval] {message}", flush=True)
+
+
 def cmd_live_eval(args) -> int:
+    key_set = api_key_present()
+    mode = "APPROVED LIVE RUN" if args.approved else "estimate only"
+    _say(f"start: {mode}, trials={args.trials}, budget_usd={args.budget_usd}")
+    # Only presence is reported; the value is never read into output or logs.
+    _say(f"API key: {'set' if key_set else 'missing'}")
     try:
         pricing = Pricing.load(args.pricing)
         plan = estimate(args.trials, pricing)
         dollars(args.budget_usd)
-        print(json.dumps(plan, indent=2))
-        if not args.approved:
-            print("Estimate only: no calls made. Review the cap, then explicitly add --approved.")
-            return 0
-        report = run_trials(args.trials, args.budget_usd, args.output, args.ledger, pricing)
-        print(json.dumps(report["scenarios"], indent=2))
-        print(f"Full report and static page: {args.output}")
-        return (
-            0
-            if all(
-                t["evaluation_verdict"] == "pass" and t["stop_reason"] == "completed"
-                for t in report["trials"]
-            )
-            else 1
-        )
-    except (OSError, ValueError, ImportError) as exc:
-        print(f"live-eval refused: {exc}")
+    except (OSError, ValueError) as exc:
+        _say(f"refused: {exc}")
         return 2
+    print(json.dumps(plan, indent=2), flush=True)
+    if not args.approved:
+        _say("estimate only: no calls made. Review the cap, then explicitly add --approved.")
+        return 0
+    if not key_set:
+        _say("refused: ANTHROPIC_API_KEY is missing; no ledger created, no calls made")
+        return 2
+    output, ledger = args.output.resolve(), args.ledger.resolve()
+    _say(f"ledger: {ledger}")
+    _say(f"output: {output}")
+    try:
+        report = run_trials(args.trials, args.budget_usd, output, ledger, pricing, progress=_say)
+    except (OSError, ValueError, ImportError, LiveStop) as exc:
+        _say(f"stopped: {getattr(exc, 'reason', 'error')}: {exc}")
+        return 2
+    except Exception as exc:  # must never exit silently
+        # Message omitted: third-party exception text may echo request details.
+        _say(f"stopped: error: unexpected {type(exc).__name__}")
+        return 2
+    print(json.dumps(report["scenarios"], indent=2), flush=True)
+    total = report["shared_ledger_total"]
+    reasons = {}
+    for trial in report["trials"]:
+        reasons[trial["stop_reason"]] = reasons.get(trial["stop_reason"], 0) + 1
+    _say(f"stop reasons: {json.dumps(reasons)}")
+    _say(
+        f"cost: calls={total['calls']} reserved=${total['reserved_nano_usd'] / 1e9:.6f} "
+        f"actual_known=${total['actual_known_nano_usd'] / 1e9:.6f} "
+        f"charged=${total['charged_nano_usd'] / 1e9:.6f} "
+        f"actual_complete={total['actual_cost_complete']}"
+    )
+    _say(f"report: {output / 'live-report.json'}")
+    _say(f"page: {output / 'live-model-evaluation.html'}")
+    ok = all(
+        t["evaluation_verdict"] == "pass" and t["stop_reason"] == "completed"
+        for t in report["trials"]
+    )
+    _say(f"exit: {0 if ok else 1} ({'all trials passed' if ok else 'some trials failed'})")
+    return 0 if ok else 1

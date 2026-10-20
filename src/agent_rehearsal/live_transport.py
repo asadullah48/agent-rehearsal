@@ -5,6 +5,11 @@ from __future__ import annotations
 import os
 
 
+def api_key_present() -> bool:
+    """Presence only; the value never leaves this module."""
+    return bool(os.environ.get("ANTHROPIC_API_KEY"))
+
+
 class AnthropicTransport:
     """Lazy optional SDK; fixed endpoint, no environment-selected gateway or retries."""
 
