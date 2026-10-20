@@ -66,6 +66,47 @@ class Pricing:
         return inputs * self.input_nano + outputs * self.output_nano
 
 
+class LedgerCapMismatch(ValueError):
+    def __init__(self, path: Path, existing: int, requested: int):
+        super().__init__(
+            f"ledger {path} is locked at cap ${existing / NANO:.9f}; requested "
+            f"${requested / NANO:.9f}. Caps are never changed. Use a new --ledger path "
+            f"for a separate budget, e.g. --ledger {path.parent / 'eval-<name>.sqlite'}"
+        )
+        self.path, self.existing, self.requested = path, existing, requested
+
+
+def _summarize(rows) -> dict:
+    return {
+        "calls": len(rows),
+        "reserved_nano_usd": sum(r["reserved"] for r in rows),
+        "charged_nano_usd": sum(r["charged"] for r in rows),
+        "actual_known_nano_usd": sum(r["actual"] or 0 for r in rows),
+        "actual_cost_complete": all(r["actual"] is not None for r in rows),
+        "open_reservations": sum(r["status"] == "open" for r in rows),
+        "uncertain_calls": sum(r["status"] == "uncertain" for r in rows),
+    }
+
+
+def read_ledger(path: Path) -> dict | None:
+    """Read-only view of a ledger; None when no initialised ledger exists at path."""
+    if not path.is_file():
+        return None
+    conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if not {"budget", "calls"} <= tables:
+            return None
+        cap = conn.execute("SELECT cap FROM budget").fetchone()
+        if cap is None:
+            return None
+        rows = conn.execute("SELECT * FROM calls").fetchall()
+        return {"path": str(path.resolve()), "cap_nano_usd": cap[0], **_summarize(rows)}
+    finally:
+        conn.close()
+
+
 class BudgetLedger:
     """One path for all concurrent runs; the cap cannot be changed by reopening it.
 
@@ -91,8 +132,9 @@ class BudgetLedger:
         """)
         with self.transaction():
             self.conn.execute("INSERT OR IGNORE INTO budget VALUES (1, ?)", (cap,))
-            if self.conn.execute("SELECT cap FROM budget").fetchone()[0] != cap:
-                raise ValueError("shared ledger cap differs; refusing to change an existing cap")
+            existing = self.conn.execute("SELECT cap FROM budget").fetchone()[0]
+            if existing != cap:
+                raise LedgerCapMismatch(path, existing, cap)
 
     @contextmanager
     def transaction(self):
@@ -141,15 +183,7 @@ class BudgetLedger:
             "SELECT * FROM calls" + (" WHERE run_id=?" if run_id else ""),
             (run_id,) if run_id else (),
         ).fetchall()
-        return {
-            "calls": len(rows),
-            "reserved_nano_usd": sum(r["reserved"] for r in rows),
-            "charged_nano_usd": sum(r["charged"] for r in rows),
-            "actual_known_nano_usd": sum(r["actual"] or 0 for r in rows),
-            "actual_cost_complete": all(r["actual"] is not None for r in rows),
-            "open_reservations": sum(r["status"] == "open" for r in rows),
-            "uncertain_calls": sum(r["status"] == "uncertain" for r in rows),
-        }
+        return _summarize(rows)
 
     def close(self) -> None:
         self.conn.close()

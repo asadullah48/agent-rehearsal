@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import subprocess
 from datetime import UTC, datetime
 from html import escape
@@ -16,15 +17,52 @@ from agent_rehearsal.live import (
     DecisionService,
     LiveModelController,
 )
-from agent_rehearsal.live_budget import MODEL, BudgetLedger, LiveStop, Pricing, dollars
+from agent_rehearsal.live_budget import (
+    MODEL,
+    BudgetLedger,
+    LedgerCapMismatch,
+    LiveStop,
+    Pricing,
+    dollars,
+    read_ledger,
+)
 from agent_rehearsal.live_transport import AnthropicTransport, api_key_present
 from agent_rehearsal.report import PROJECT_ROOT, _source_revision
 from agent_rehearsal.runner import execute_run, prepare_output_dir
 from agent_rehearsal.scenarios import DEFAULT_SCENARIOS_DIR, load_scenario
 
 DEFAULT_PRICE = PROJECT_ROOT / "config" / "live-pricing.json"
-# Every command defaults to this same ledger, independent of its output directory.
-DEFAULT_LEDGER = PROJECT_ROOT / ".rehearsal" / "live-budget.sqlite"
+# Each evaluation gets its own ledger here unless --ledger names one; calls within one
+# evaluation share it. Every ledger used is appended to the registry for live-spend.
+DEFAULT_LEDGERS_DIR = PROJECT_ROOT / ".rehearsal" / "ledgers"
+LEGACY_LEDGER = PROJECT_ROOT / ".rehearsal" / "live-budget.sqlite"
+REGISTRY = "registry.txt"
+
+
+def new_ledger_path(ledgers_dir: Path) -> Path:
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+    return ledgers_dir / f"eval-{stamp}.sqlite"
+
+
+def register_ledger(ledgers_dir: Path, ledger: Path) -> None:
+    """Append-only; ledgers themselves are never edited or deleted here."""
+    ledgers_dir.mkdir(parents=True, exist_ok=True)
+    with (ledgers_dir / REGISTRY).open("a", encoding="utf-8") as fh:
+        fh.write(f"{ledger.resolve()}\n")
+
+
+def known_ledgers(ledgers_dir: Path, extra: list[Path] = ()) -> list[Path]:
+    paths = list(ledgers_dir.glob("*.sqlite")) if ledgers_dir.is_dir() else []
+    registry = ledgers_dir / REGISTRY
+    if registry.is_file():
+        lines = registry.read_text(encoding="utf-8").splitlines()
+        paths += [Path(line) for line in lines if line.strip()]
+    if LEGACY_LEDGER.is_file():
+        paths.append(LEGACY_LEDGER)
+    unique: dict[str, Path] = {}
+    for path in [*paths, *extra]:
+        unique.setdefault(str(path.resolve()).lower(), path.resolve())
+    return sorted(unique.values())
 
 
 def estimate(trials: int, pricing: Pricing) -> dict:
@@ -291,13 +329,26 @@ def cmd_live_eval(args) -> int:
     _say(f"start: {mode}, trials={args.trials}, budget_usd={args.budget_usd}")
     # Only presence is reported; the value is never read into output or logs.
     _say(f"API key: {'set' if key_set else 'missing'}")
+    ledgers_dir = args.ledgers_dir.resolve()
+    explicit = args.ledger is not None
+    ledger = (args.ledger if explicit else new_ledger_path(ledgers_dir)).resolve()
     try:
         pricing = Pricing.load(args.pricing)
         plan = estimate(args.trials, pricing)
-        dollars(args.budget_usd)
-    except (OSError, ValueError) as exc:
+        cap = dollars(args.budget_usd)
+        existing = read_ledger(ledger) if explicit else None
+        if existing is not None and existing["cap_nano_usd"] != cap:
+            raise LedgerCapMismatch(ledger, existing["cap_nano_usd"], cap)
+    except (OSError, ValueError, sqlite3.Error) as exc:
         _say(f"refused: {exc}")
         return 2
+    if existing is not None:
+        _say(
+            f"ledger: reusing {ledger} (cap ${existing['cap_nano_usd'] / 1e9:.6f}, "
+            f"already charged ${existing['charged_nano_usd'] / 1e9:.6f})"
+        )
+    else:
+        _say(f"ledger: new {ledger} (cap ${cap / 1e9:.6f})")
     print(json.dumps(plan, indent=2), flush=True)
     if not args.approved:
         _say("estimate only: no calls made. Review the cap, then explicitly add --approved.")
@@ -305,8 +356,7 @@ def cmd_live_eval(args) -> int:
     if not key_set:
         _say("refused: ANTHROPIC_API_KEY is missing; no ledger created, no calls made")
         return 2
-    output, ledger = args.output.resolve(), args.ledger.resolve()
-    _say(f"ledger: {ledger}")
+    output = args.output.resolve()
     _say(f"output: {output}")
     try:
         report = run_trials(args.trials, args.budget_usd, output, ledger, pricing, progress=_say)
@@ -317,6 +367,9 @@ def cmd_live_eval(args) -> int:
         # Message omitted: third-party exception text may echo request details.
         _say(f"stopped: error: unexpected {type(exc).__name__}")
         return 2
+    finally:
+        if ledger.is_file():
+            register_ledger(ledgers_dir, ledger)
     print(json.dumps(report["scenarios"], indent=2), flush=True)
     total = report["shared_ledger_total"]
     reasons = {}
@@ -337,3 +390,43 @@ def cmd_live_eval(args) -> int:
     )
     _say(f"exit: {0 if ok else 1} ({'all trials passed' if ok else 'some trials failed'})")
     return 0 if ok else 1
+
+
+def cmd_live_spend(args) -> int:
+    """Read-only spend across every known ledger; never opens a ledger for writing."""
+    paths = known_ledgers(args.ledgers_dir.resolve(), args.ledger or [])
+    keys = ("calls", "reserved_nano_usd", "charged_nano_usd", "actual_known_nano_usd")
+    totals = dict.fromkeys(keys, 0)
+    complete, unreadable = True, 0
+    print(f"[live-spend] ledgers found: {len(paths)}")
+    for path in paths:
+        try:
+            doc = read_ledger(path)
+        except sqlite3.Error as exc:
+            print(f"  {path}: unreadable ({type(exc).__name__})")
+            unreadable += 1
+            continue
+        if doc is None:
+            print(f"  {path}: missing or not initialised (no spend recorded)")
+            continue
+        for key in keys:
+            totals[key] += doc[key]
+        complete = complete and doc["actual_cost_complete"]
+        print(
+            f"  {path}: cap=${doc['cap_nano_usd'] / 1e9:.6f} calls={doc['calls']} "
+            f"charged=${doc['charged_nano_usd'] / 1e9:.6f} "
+            f"actual_known=${doc['actual_known_nano_usd'] / 1e9:.6f} "
+            f"open={doc['open_reservations']} uncertain={doc['uncertain_calls']}"
+        )
+    print(
+        f"[live-spend] TOTAL calls={totals['calls']} "
+        f"charged=${totals['charged_nano_usd'] / 1e9:.6f} "
+        f"actual_known=${totals['actual_known_nano_usd'] / 1e9:.6f} "
+        f"gross_reserved=${totals['reserved_nano_usd'] / 1e9:.6f} "
+        f"actual_complete={complete}"
+    )
+    print(
+        "[live-spend] 'charged' = known actual cost plus unresolved full reservations "
+        "(conservative). Application-side record, not provider billing."
+    )
+    return 1 if unreadable else 0

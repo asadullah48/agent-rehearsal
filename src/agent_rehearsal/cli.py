@@ -206,16 +206,31 @@ def build_parser() -> argparse.ArgumentParser:
         "and an independent evaluator. Synthetic data only.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
-    from agent_rehearsal.live_eval import DEFAULT_LEDGER, DEFAULT_PRICE, cmd_live_eval
+    from agent_rehearsal.live_eval import (
+        DEFAULT_LEDGERS_DIR,
+        DEFAULT_PRICE,
+        cmd_live_eval,
+        cmd_live_spend,
+    )
 
     live = sub.add_parser("live-eval", help="manual opt-in live evaluation; estimates by default")
     live.add_argument("--trials", type=int, required=True)
     live.add_argument("--budget-usd", required=True)
     live.add_argument("--approved", action="store_true", help="explicit approval of displayed cap")
     live.add_argument("--pricing", type=Path, default=DEFAULT_PRICE)
-    live.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
+    live.add_argument(
+        "--ledger",
+        type=Path,
+        help="budget ledger for this evaluation (cap locked once set); default: a new one",
+    )
+    live.add_argument("--ledgers-dir", type=Path, default=DEFAULT_LEDGERS_DIR)
     live.add_argument("--output", type=Path, default=Path(".rehearsal/live-eval"))
     live.set_defaults(func=cmd_live_eval)
+
+    spend = sub.add_parser("live-spend", help="read-only total spend across all budget ledgers")
+    spend.add_argument("--ledgers-dir", type=Path, default=DEFAULT_LEDGERS_DIR)
+    spend.add_argument("--ledger", type=Path, action="append", help="extra ledger to include")
+    spend.set_defaults(func=cmd_live_spend)
 
     scen = sub.add_parser("scenarios", help="scenario catalog")
     scen_sub = scen.add_subparsers(dest="scenarios_command", required=True)

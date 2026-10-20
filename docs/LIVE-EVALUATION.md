@@ -66,12 +66,19 @@ exceeds the configured cap, making an assumption violation visible.
 reserved = bounded_input_tokens * input_rate + 1024 * output_rate
 ```
 
-All arithmetic uses integer nanodollars. The default shared ledger is
-`.rehearsal/live-budget.sqlite`, independent of each run directory. A
-`BEGIN IMMEDIATE` transaction checks spent plus open reservations plus the new
-reservation against its immutable cap, and commits the reservation before dispatch.
-Concurrent commands must use this same ledger path; separate explicitly selected
-ledgers represent separate budgets and do not share a cap.
+All arithmetic uses integer nanodollars. Each evaluation uses one budget ledger,
+independent of its run directories: `--ledger <path>` names it, otherwise a new
+`.rehearsal/ledgers/eval-<UTC timestamp>.sqlite` is created. All calls and trials
+within that evaluation share it. A `BEGIN IMMEDIATE` transaction checks spent plus
+open reservations plus the new reservation against its immutable cap, and commits
+the reservation before dispatch. Commands that must share one budget pass the same
+`--ledger`; separate ledgers are separate budgets and do not share a cap.
+
+A ledger's cap is locked when it is created. Reusing a ledger with any other
+`--budget-usd` is refused before any output, ledger write or call, with a message
+naming the ledger, its locked cap and a suggested new `--ledger` path. Nothing in
+this application edits, resets or deletes a ledger. Every ledger used is appended to
+`.rehearsal/ledgers/registry.txt` so that `rehearsal live-spend` can total them.
 
 Known valid usage replaces the reserved charge with the actual usage-based cost.
 Missing, malformed, negative, boolean, unexpected cached/server-tool usage, timeout,
@@ -162,12 +169,24 @@ A lower approved cap is supported and may stop trials early.
 Only after explicit approval of the cap, with `ANTHROPIC_API_KEY` already set:
 
 ```powershell
-rehearsal live-eval --trials 3 --budget-usd 5.25 --approved --output .rehearsal/live-eval-001
+rehearsal live-eval --trials 3 --budget-usd 5.25 --approved --ledger .rehearsal/ledgers/main.sqlite --output .rehearsal/live-eval-001
 ```
+
+The command always prints a start line, `API key: set` or `missing` (never the
+value), the ledger path and cap, per-call reservation and settlement, each trial's
+stop reason and verdict, cost totals, the report path and its exit code. Exit codes:
+0 all trials passed, 1 some trials failed or stopped, 2 refused or aborted.
 
 The `--approved` flag is the operator's explicit opt-in, not proof of a provider
 billing limit. Existing ledger caps cannot be raised by another command. Do not
 select a new ledger merely to evade an exhausted or uncertain approved budget.
+
+Total recorded spend across every ledger (read-only; opens each ledger with
+`mode=ro`; add `--ledger <path>` for any ledger kept outside the registry):
+
+```powershell
+rehearsal live-spend
+```
 
 Build a static demo from the saved report (no provider calls):
 

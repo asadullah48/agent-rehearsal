@@ -21,7 +21,15 @@ from agent_rehearsal.live import (
     LiveModelController,
     input_bound,
 )
-from agent_rehearsal.live_budget import MODEL, BudgetLedger, LiveStop, Pricing, dollars
+from agent_rehearsal.live_budget import (
+    MODEL,
+    BudgetLedger,
+    LedgerCapMismatch,
+    LiveStop,
+    Pricing,
+    dollars,
+    read_ledger,
+)
 from agent_rehearsal.live_eval import (
     DEFAULT_PRICE,
     estimate,
@@ -294,7 +302,7 @@ def test_concurrent_runs_share_atomic_cap_and_open_reservations(tmp_path):
     assert ledger.summary()["open_reservations"] == 1
     assert ledger.summary()["charged_nano_usd"] == 60
     ledger.close()
-    with pytest.raises(ValueError, match="cap differs"):
+    with pytest.raises(LedgerCapMismatch, match="locked at cap"):
         BudgetLedger(path, 200)
 
 
@@ -428,19 +436,10 @@ def test_live_eval_default_is_estimate_only(tmp_path, capsys):
 SENTINEL_KEY = "sentinel-offline-key-never-printed"
 
 
-def approved_args(tmp_path):
-    return [
-        "live-eval",
-        "--trials",
-        "1",
-        "--budget-usd",
-        "0.5",
-        "--approved",
-        "--output",
-        str(tmp_path / "output"),
-        "--ledger",
-        str(tmp_path / "ledger.sqlite"),
-    ]
+def approved_args(tmp_path, budget="0.5", ledger="ledger.sqlite", output="output"):
+    args = ["live-eval", "--trials", "1", "--budget-usd", budget, "--approved"]
+    args += ["--output", str(tmp_path / output), "--ledgers-dir", str(tmp_path / "ledgers")]
+    return args + (["--ledger", str(tmp_path / ledger)] if ledger else [])
 
 
 def fake_sdk(monkeypatch, transport):
@@ -486,6 +485,88 @@ def test_approved_live_eval_without_key_refuses_loudly(tmp_path, monkeypatch, ca
     assert "refused: ANTHROPIC_API_KEY is missing" in out
     assert not (tmp_path / "ledger.sqlite").exists()
     assert not (tmp_path / "output").exists()
+
+
+def refusing_transport():
+    return RecordedTransport([finish("REFUSED"), finish("REFUSED")])
+
+
+def test_smoke_and_main_evaluations_use_separate_locked_ledgers(tmp_path, monkeypatch, capsys):
+    fake_sdk(monkeypatch, refusing_transport())
+    assert main(approved_args(tmp_path, "0.5", "smoke.sqlite", "smoke")) == 1
+    fake_sdk(monkeypatch, refusing_transport())
+    assert main(approved_args(tmp_path, "2", "main.sqlite", "main")) == 1
+    smoke, main_run = read_ledger(tmp_path / "smoke.sqlite"), read_ledger(tmp_path / "main.sqlite")
+    assert smoke["cap_nano_usd"] == dollars("0.5") and smoke["calls"] == 2
+    assert main_run["cap_nano_usd"] == dollars("2") and main_run["calls"] == 2
+    capsys.readouterr()
+
+
+@pytest.mark.parametrize("approved", [True, False])
+def test_reusing_a_ledger_with_another_cap_refuses_and_names_it(
+    tmp_path, monkeypatch, capsys, approved
+):
+    fake_sdk(monkeypatch, refusing_transport())
+    assert main(approved_args(tmp_path, "0.5", "smoke.sqlite", "first")) == 1
+    before = (tmp_path / "smoke.sqlite").read_bytes()
+    capsys.readouterr()
+    args = approved_args(tmp_path, "2", "smoke.sqlite", "second")
+    if not approved:
+        args.remove("--approved")
+    assert main(args) == 2
+    out = capsys.readouterr().out
+    assert f"ledger {(tmp_path / 'smoke.sqlite').resolve()} is locked at cap $0.500000000" in out
+    assert "requested $2.000000000" in out and "Use a new --ledger path" in out
+    assert not (tmp_path / "second").exists()
+    assert (tmp_path / "smoke.sqlite").read_bytes() == before  # never edited
+    with pytest.raises(LedgerCapMismatch):
+        BudgetLedger(tmp_path / "smoke.sqlite", dollars("2"))
+
+
+def test_reusing_a_ledger_with_same_cap_shares_its_budget(tmp_path, monkeypatch, capsys):
+    fake_sdk(monkeypatch, refusing_transport())
+    assert main(approved_args(tmp_path, "0.5", "smoke.sqlite", "first")) == 1
+    fake_sdk(monkeypatch, refusing_transport())
+    assert main(approved_args(tmp_path, "0.5", "smoke.sqlite", "second")) == 1
+    assert "ledger: reusing" in capsys.readouterr().out
+    assert read_ledger(tmp_path / "smoke.sqlite")["calls"] == 4
+
+
+def test_default_ledger_is_new_per_evaluation(tmp_path, monkeypatch, capsys):
+    for output in ("one", "two"):
+        fake_sdk(monkeypatch, refusing_transport())
+        assert main(approved_args(tmp_path, "0.5", None, output)) == 1
+    ledgers = sorted((tmp_path / "ledgers").glob("eval-*.sqlite"))
+    assert len(ledgers) == 2
+    assert all(read_ledger(p)["calls"] == 2 for p in ledgers)
+    capsys.readouterr()
+
+
+def test_live_spend_totals_all_ledgers_read_only(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr("agent_rehearsal.live_eval.LEGACY_LEDGER", tmp_path / "absent.sqlite")
+    fake_sdk(monkeypatch, refusing_transport())
+    main(approved_args(tmp_path, "0.5", "smoke.sqlite", "smoke"))
+    fake_sdk(monkeypatch, refusing_transport())
+    main(approved_args(tmp_path, "2", None, "main"))
+    outside = BudgetLedger(tmp_path / "elsewhere.sqlite", dollars("1"))
+    outside.reserve("x", "run", 7_000, 1, 1)
+    outside.close()
+    files = [tmp_path / "smoke.sqlite", tmp_path / "elsewhere.sqlite"]
+    snapshot = [p.read_bytes() for p in files]
+    capsys.readouterr()
+    ledgers_dir = str(tmp_path / "ledgers")
+    extra = str(tmp_path / "elsewhere.sqlite")
+    assert main(["live-spend", "--ledgers-dir", ledgers_dir, "--ledger", extra]) == 0
+    out = capsys.readouterr().out
+    expected = 4 * price_of_mock_call() + 7_000
+    assert "ledgers found: 3" in out
+    assert f"TOTAL calls=5 charged=${expected / 1e9:.6f}" in out
+    assert "actual_complete=False" in out  # the open reservation stays charged
+    assert [p.read_bytes() for p in files] == snapshot
+
+
+def price_of_mock_call():
+    return Pricing.load(DEFAULT_PRICE).cost(100, 50)
 
 
 def test_cli_module_entry_point_is_not_silent():
