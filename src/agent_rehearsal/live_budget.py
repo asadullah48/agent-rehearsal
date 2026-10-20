@@ -76,6 +76,12 @@ class LedgerCapMismatch(ValueError):
         self.path, self.existing, self.requested = path, existing, requested
 
 
+def _reason(row) -> str | None:
+    # Ledgers written before the reason column existed are read-only here; never migrated.
+    # sqlite3.Row is a sequence: `in row` would test values, so .keys() is required.
+    return row["reason"] if "reason" in row.keys() else None  # noqa: SIM118
+
+
 def _summarize(rows) -> dict:
     return {
         "calls": len(rows),
@@ -85,6 +91,10 @@ def _summarize(rows) -> dict:
         "actual_cost_complete": all(r["actual"] is not None for r in rows),
         "open_reservations": sum(r["status"] == "open" for r in rows),
         "uncertain_calls": sum(r["status"] == "uncertain" for r in rows),
+        "rejected_calls": sum(r["status"] == "rejected" for r in rows),
+        "uncertain_reasons": [
+            f"{r['id']}: {_reason(r) or 'unrecorded'}" for r in rows if r["status"] == "uncertain"
+        ],
     }
 
 
@@ -128,9 +138,12 @@ class BudgetLedger:
                 reserved INTEGER NOT NULL CHECK(reserved>0),
                 charged INTEGER NOT NULL CHECK(charged>=0),
                 actual INTEGER, status TEXT NOT NULL,
-                input_bound INTEGER NOT NULL, max_tokens INTEGER NOT NULL);
+                input_bound INTEGER NOT NULL, max_tokens INTEGER NOT NULL, reason TEXT);
         """)
         with self.transaction():
+            columns = {r["name"] for r in self.conn.execute("PRAGMA table_info(calls)")}
+            if "reason" not in columns:
+                self.conn.execute("ALTER TABLE calls ADD COLUMN reason TEXT")
             self.conn.execute("INSERT OR IGNORE INTO budget VALUES (1, ?)", (cap,))
             existing = self.conn.execute("SELECT cap FROM budget").fetchone()[0]
             if existing != cap:
@@ -148,8 +161,17 @@ class BudgetLedger:
 
     def reserve(self, call_id: str, run_id: str, amount: int, inputs: int, outputs: int) -> None:
         with self.transaction():
-            if self.conn.execute("SELECT 1 FROM calls WHERE status='uncertain' LIMIT 1").fetchone():
-                raise LiveStop("stopped_uncertain", "shared ledger has uncertain billing; stopped")
+            blocker = self.conn.execute(
+                "SELECT * FROM calls WHERE status='uncertain' ORDER BY rowid LIMIT 1"
+            ).fetchone()
+            if blocker is not None:
+                # Intended run-wide halt: unknown billing makes every later cost bound unsound.
+                raise LiveStop(
+                    "stopped_uncertain",
+                    f"shared ledger has uncertain billing from call {blocker['id']} "
+                    f"({_reason(blocker) or 'unrecorded'}); no further calls are dispatched "
+                    "on this ledger",
+                )
             if self.conn.execute("SELECT 1 FROM calls WHERE id=?", (call_id,)).fetchone():
                 raise LiveStop("stopped_uncertain", "dispatch already reserved; never redispatch")
             cap = self.conn.execute("SELECT cap FROM budget").fetchone()[0]
@@ -157,26 +179,44 @@ class BudgetLedger:
             if charged + amount > cap:
                 raise LiveStop("stopped_budget", "shared model budget exhausted before dispatch")
             self.conn.execute(
-                "INSERT INTO calls VALUES (?, ?, ?, ?, NULL, 'open', ?, ?)",
+                "INSERT INTO calls (id, run_id, reserved, charged, actual, status, input_bound,"
+                " max_tokens) VALUES (?, ?, ?, ?, NULL, 'open', ?, ?)",
                 (call_id, run_id, amount, amount, inputs, outputs),
             )
 
-    def settle(self, call_id: str, actual: int | None, *, uncertain: bool = False) -> None:
+    def _open_row(self, call_id: str):
+        row = self.conn.execute("SELECT * FROM calls WHERE id=?", (call_id,)).fetchone()
+        if row is None or row["status"] != "open":
+            raise ValueError("reservation missing or already settled")
+        return row
+
+    def settle(self, call_id: str, actual: int | None, *, reason: str | None = None) -> None:
+        """Settle a dispatched call. Any reason, unknown actual or overrun is uncertain."""
         if actual is not None and (type(actual) is not int or actual < 0):
             raise ValueError("invalid actual cost")
         with self.transaction():
-            row = self.conn.execute("SELECT * FROM calls WHERE id=?", (call_id,)).fetchone()
-            if row is None or row["status"] != "open":
-                raise ValueError("reservation missing or already settled")
-            uncertain = uncertain or actual is None or actual > row["reserved"]
+            row = self._open_row(call_id)
+            if reason is None and actual is None:
+                reason = "actual_cost_unknown"
+            if reason is None and actual > row["reserved"]:
+                reason = "actual_cost_over_reservation"
             # If pricing/token assumptions were exceeded, disclose the full known liability.
-            charged = max(row["reserved"], actual or 0) if uncertain else actual
+            charged = max(row["reserved"], actual or 0) if reason else actual
             self.conn.execute(
-                "UPDATE calls SET charged=?, actual=?, status=? WHERE id=?",
-                (charged, actual, "uncertain" if uncertain else "settled", call_id),
+                "UPDATE calls SET charged=?, actual=?, status=?, reason=? WHERE id=?",
+                (charged, actual, "uncertain" if reason else "settled", reason, call_id),
             )
-        if uncertain:
-            raise LiveStop("stopped_uncertain", "billing uncertain or reservation bound exceeded")
+        if reason:
+            raise LiveStop("stopped_uncertain", f"billing uncertain: {reason}")
+
+    def reject(self, call_id: str, reason: str) -> None:
+        """Provider refused the request before processing (HTTP 4xx): not billed, released."""
+        with self.transaction():
+            self._open_row(call_id)
+            self.conn.execute(
+                "UPDATE calls SET charged=0, actual=0, status='rejected', reason=? WHERE id=?",
+                (reason, call_id),
+            )
 
     def summary(self, run_id: str | None = None) -> dict:
         rows = self.conn.execute(

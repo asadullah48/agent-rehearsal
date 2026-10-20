@@ -81,10 +81,26 @@ this application edits, resets or deletes a ledger. Every ledger used is appende
 `.rehearsal/ledgers/registry.txt` so that `rehearsal live-spend` can total them.
 
 Known valid usage replaces the reserved charge with the actual usage-based cost.
-Missing, malformed, negative, boolean, unexpected cached/server-tool usage, timeout,
-or connection failure retains the full reservation and stops as `stopped_uncertain`
-(`STOPPED_UNCERTAIN`). It also blocks further dispatches through that ledger.
-The implementation conservatively treats other transport exceptions the same way.
+Zero or null cache fields, a zero-valued or null `server_tool_use`, and
+`service_tier: "standard"` are normal and settle. Missing, malformed, negative or
+boolean usage, non-zero cache or server-tool usage, a non-standard service tier, a
+returned model id that differs from the configured dated id, usage above the
+reservation estimate, a timeout, a dropped connection or an HTTP 5xx response retains
+the full reservation and stops as `stopped_uncertain` (`STOPPED_UNCERTAIN`). It also
+blocks further dispatches through that ledger: this run-wide halt is intended, because
+unknown billing makes every later cost bound unsound. Other transport exceptions are
+treated the same way.
+
+An HTTP 4xx error response (for example 401 authentication, 400, 403, 429) means the
+API rejected the request before processing it; failed requests are not billed. The
+call is recorded as `rejected`, its reservation is released (charged $0), and the
+trial stops as `error`. A rejection does not halt the ledger.
+
+Every uncertain or rejected call records a specific reason in the ledger's `reason`
+column and in a `model.call_failed` or `model.response_received` run event: the
+exception class, HTTP status and provider request id only, never exception text.
+The console prints the reason, and a trial that dispatched nothing names the call
+that halted the ledger.
 An abrupt process exit leaves an open, fully charged reservation. Reopening the
 ledger never releases it. There is no reset, refund, or automatic weekly rollover.
 The live budget is unrelated to ChatGPT account usage limits.

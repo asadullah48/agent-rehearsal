@@ -23,6 +23,7 @@ from agent_rehearsal.controller import (
     WorkflowState,
 )
 from agent_rehearsal.live_budget import MODEL, BudgetLedger, LiveStop, Pricing
+from agent_rehearsal.live_transport import TransportFailure
 from agent_rehearsal.models import Strict
 from agent_rehearsal.store import HARNESS, Store
 from agent_rehearsal.tools import AGENT_TOOLS
@@ -81,6 +82,44 @@ def system_prompt() -> str:
     return SYSTEM + canonical_json(
         {name: schema.model_json_schema() for name, schema in AGENT_TOOLS.items()}
     )
+
+
+def _nonzero(value: Any) -> bool:
+    """True when a usage field reports real consumption; absent, null and zeros are fine."""
+    if value is None:
+        return False
+    if isinstance(value, dict):
+        return any(_nonzero(v) for v in value.values())
+    return value != 0
+
+
+def usage_problem(response: Any) -> str | None:
+    """Why a response's billing cannot be computed from pricing, or None when it can.
+
+    Only names fields and the returned model id; never echoes content or headers.
+    """
+    if not isinstance(response, dict):
+        return "response_not_an_object"
+    usage = response.get("usage")
+    if not isinstance(usage, dict):
+        return "missing_usage"
+    inputs, outputs = usage.get("input_tokens"), usage.get("output_tokens")
+    if type(inputs) is not int or type(outputs) is not int:
+        return "missing_usage_tokens"
+    if not (0 <= inputs <= 200_000 and 0 <= outputs <= 64_000):
+        return "usage_tokens_out_of_range"
+    model = response.get("model")
+    if model != MODEL:
+        # Exact match only: the request names the dated id, so an alias is unexpected too.
+        return f"model_mismatch: requested {MODEL}, returned {str(model)[:80]!r}"
+    for key in ("cache_creation_input_tokens", "cache_read_input_tokens", "cache_creation"):
+        if _nonzero(usage.get(key)):
+            return f"nonzero_{key}"
+    if _nonzero(usage.get("server_tool_use")):
+        return "nonzero_server_tool_use"
+    if usage.get("service_tier") not in (None, "standard"):
+        return f"service_tier_not_standard: {str(usage.get('service_tier'))[:40]!r}"
+    return None
 
 
 def input_bound(request: dict) -> int:
@@ -193,15 +232,33 @@ class DecisionService:
                     "live_cost", canonical_json(self.ledger.summary(self.store.meta("run_id")))
                 )
 
-    def _settle(self, call_id: str, actual: int | None, *, uncertain: bool = False) -> None:
+    def _settle(self, call_id: str, actual: int | None, *, reason: str | None = None) -> None:
         try:
-            self.ledger.settle(call_id, actual, uncertain=uncertain)
+            self.ledger.settle(call_id, actual, reason=reason)
             self.progress(f"call {call_id}: settled, actual ${actual / 1e9:.6f}")
         except LiveStop as exc:
-            self.progress(f"call {call_id}: {exc.reason}, full reservation kept as spent")
+            self.progress(f"call {call_id}: {exc.reason}, full reservation kept as spent ({exc})")
             raise
         finally:
             self._sync_cost()
+
+    def _failed(self, step: int, call_id: str, failure: TransportFailure) -> None:
+        with self.store.transaction() as tx:
+            tx.add_event(
+                HARNESS, "model.call_failed", {"step": step, "call_id": call_id, **failure.record()}
+            )
+        if not failure.rejected:
+            self._settle(call_id, None, reason=f"transport_failure: {failure.reason}")
+            raise AssertionError("uncertain settle must stop")
+        try:
+            self.ledger.reject(call_id, failure.reason)
+        finally:
+            self._sync_cost()
+        self.progress(
+            f"call {call_id}: error (rejected by API: {failure.reason}), "
+            "not billed, reservation released"
+        )
+        raise LiveStop("error", f"request rejected by API before processing: {failure.reason}")
 
     def __call__(self, step: int, request: dict) -> dict:
         saved = self.store.row("SELECT * FROM model_decisions WHERE step=?", (step,))
@@ -239,37 +296,35 @@ class DecisionService:
         self.progress(f"call {call_id}: reserved ${reserved / 1e9:.6f}, dispatching")
         try:
             response = self.transport(request)
-        except Exception:
+        except TransportFailure as failure:
+            self._failed(step, call_id, failure)
+        except Exception as exc:
             # Never record exception strings: an SDK error can contain request credentials.
-            self._settle(call_id, None)
-            raise AssertionError("settle(None) must stop") from None
+            self._failed(step, call_id, TransportFailure(type(exc).__name__))
         usage = response.get("usage", {}) if isinstance(response, dict) else {}
+        problem = usage_problem(response)
         with self.store.transaction() as tx:
             tx.add_event(
                 HARNESS,
                 "model.response_received",
-                {"step": step, "provider": "anthropic", "model": MODEL, "usage": usage},
+                {
+                    "step": step,
+                    "provider": "anthropic",
+                    "model": MODEL,
+                    "returned_model": response.get("model") if isinstance(response, dict) else None,
+                    "usage": usage,
+                    "usage_problem": problem,
+                },
             )
         actual = None
-        inputs = outputs = None
-        if isinstance(usage, dict):
-            inputs, outputs = usage.get("input_tokens"), usage.get("output_tokens")
-            extras = (
-                usage.get("cache_creation_input_tokens", 0),
-                usage.get("cache_read_input_tokens", 0),
-                usage.get("server_tool_use"),
-            )
-            if (
-                type(inputs) is int
-                and type(outputs) is int
-                and 0 <= inputs <= 200_000
-                and 0 <= outputs <= 64_000
-                and response.get("model") == MODEL
-                and not any(extras)
-            ):
-                actual = self.pricing.cost(inputs, outputs)
-        exceeded = actual is not None and (inputs > bound or outputs > MAX_OUTPUT)
-        self._settle(call_id, actual, uncertain=exceeded)
+        if problem is None:
+            inputs, outputs = usage["input_tokens"], usage["output_tokens"]
+            actual = self.pricing.cost(inputs, outputs)
+            if inputs > bound or outputs > MAX_OUTPUT:
+                problem = (
+                    f"usage_over_estimate: input {inputs}/{bound}, output {outputs}/{MAX_OUTPUT}"
+                )
+        self._settle(call_id, actual, reason=problem)
         if response.get("stop_reason") != "end_turn":
             raise LiveStop("error", "incomplete proposal")
         blocks = response.get("content")

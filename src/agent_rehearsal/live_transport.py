@@ -3,11 +3,57 @@
 from __future__ import annotations
 
 import os
+import re
 
 
 def api_key_present() -> bool:
     """Presence only; the value never leaves this module."""
     return bool(os.environ.get("ANTHROPIC_API_KEY"))
+
+
+class TransportFailure(Exception):
+    """Credential-free description of a failed dispatch: class, status, request id only.
+
+    rejected=True only for an HTTP 4xx error response: the API refused the request before
+    processing it, and failed requests are not billed. Timeouts, dropped connections and
+    5xx responses stay uncertain because the request may have been processed.
+    """
+
+    def __init__(
+        self,
+        exception_class: str,
+        status_code: int | None = None,
+        request_id: str | None = None,
+    ):
+        self.exception_class = exception_class
+        self.status_code = status_code
+        self.request_id = request_id
+        self.rejected = status_code is not None and 400 <= status_code < 500
+        status = f"HTTP {status_code} " if status_code is not None else ""
+        self.reason = f"{status}{exception_class}"
+        super().__init__(self.reason)
+
+    def record(self) -> dict:
+        return {
+            "exception_class": self.exception_class,
+            "status_code": self.status_code,
+            "request_id": self.request_id,
+            "billing": "not_billed_rejected" if self.rejected else "uncertain",
+        }
+
+
+def classify(exc: BaseException) -> TransportFailure:
+    """Map an SDK exception to a TransportFailure without keeping its message text."""
+    import anthropic
+
+    name = type(exc).__name__
+    if isinstance(exc, anthropic.APIStatusError):
+        request_id = getattr(exc, "request_id", None)
+        if not (isinstance(request_id, str) and re.fullmatch(r"[A-Za-z0-9_\-]{1,128}", request_id)):
+            request_id = None
+        return TransportFailure(name, int(exc.status_code), request_id)
+    # APITimeoutError, APIConnectionError and anything unexpected: no status, uncertain.
+    return TransportFailure(name)
 
 
 class AnthropicTransport:
@@ -27,7 +73,12 @@ class AnthropicTransport:
 
     def __call__(self, request: dict) -> dict:
         # No tools, cache_control, batch, beta features, streaming, or enabled thinking.
-        return self.client.messages.create(**request).model_dump(mode="json")
+        try:
+            message = self.client.messages.create(**request)
+        except Exception as exc:
+            # `from None`: the SDK exception text and chained context never propagate.
+            raise classify(exc) from None
+        return message.model_dump(mode="json")
 
     def close(self) -> None:
         self.client.close()

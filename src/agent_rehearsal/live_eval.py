@@ -277,9 +277,11 @@ def run_trials(
                         **trial_metrics(result.report),
                     }
                 )
+                done = records[-1]
                 progress(
-                    f"trial {scenario_id} #{trial}: stop={records[-1]['stop_reason']} "
-                    f"verdict={records[-1]['evaluation_verdict']}"
+                    f"trial {scenario_id} #{trial}: stop={done['stop_reason']} "
+                    f"verdict={done['evaluation_verdict']} calls={done['cost'].get('calls', 0)}"
+                    + (f" — {done['stop_detail']}" if done["stop_reason"] != "completed" else "")
                 )
                 # Incremental results survive interruption of a later trial.
                 (output / "trials.json").write_text(
@@ -380,8 +382,10 @@ def cmd_live_eval(args) -> int:
         f"cost: calls={total['calls']} reserved=${total['reserved_nano_usd'] / 1e9:.6f} "
         f"actual_known=${total['actual_known_nano_usd'] / 1e9:.6f} "
         f"charged=${total['charged_nano_usd'] / 1e9:.6f} "
-        f"actual_complete={total['actual_cost_complete']}"
+        f"actual_complete={total['actual_cost_complete']} rejected={total['rejected_calls']}"
     )
+    for reason in total["uncertain_reasons"]:
+        _say(f"uncertain call {reason}")
     _say(f"report: {output / 'live-report.json'}")
     _say(f"page: {output / 'live-model-evaluation.html'}")
     ok = all(
@@ -416,8 +420,11 @@ def cmd_live_spend(args) -> int:
             f"  {path}: cap=${doc['cap_nano_usd'] / 1e9:.6f} calls={doc['calls']} "
             f"charged=${doc['charged_nano_usd'] / 1e9:.6f} "
             f"actual_known=${doc['actual_known_nano_usd'] / 1e9:.6f} "
-            f"open={doc['open_reservations']} uncertain={doc['uncertain_calls']}"
+            f"open={doc['open_reservations']} uncertain={doc['uncertain_calls']} "
+            f"rejected={doc['rejected_calls']}"
         )
+        for reason in doc["uncertain_reasons"]:
+            print(f"    uncertain call {reason}")
     print(
         f"[live-spend] TOTAL calls={totals['calls']} "
         f"charged=${totals['charged_nano_usd'] / 1e9:.6f} "
