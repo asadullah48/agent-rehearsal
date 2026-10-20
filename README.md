@@ -107,6 +107,11 @@ recorded responses, events, simulated timestamps, assertions and outcomes are al
 compared. A different seed changes operation keys, so its trace differs, and a
 test checks that.
 
+`tests/golden/` holds the seed-42 canonical trace of every deterministic scenario
+and scripted case; `tests/test_golden.py` fails on any difference. Scenario and
+policy hashes are included, so changing a scenario file requires regenerating its
+golden file on purpose: `REHEARSAL_UPDATE_GOLDEN=1 python -m pytest tests/test_golden.py`.
+
 ## Design notes
 
 ### Crash and resume (PowerShell)
