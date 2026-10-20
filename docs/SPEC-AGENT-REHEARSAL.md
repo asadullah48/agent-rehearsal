@@ -196,6 +196,8 @@ Default offline limits: 30 proposed actions and 3 attempts per logical operation
 
 Scenarios are versioned JSON data, not executable scripts. They include initial world, actor capabilities, reviewer actions, fault triggers, expected business outcome, and assertion IDs. Loader validates schema and references before creating a run.
 
+A reviewer action is `grant_approval` (requires `ttl_seconds`) or `decline` (takes no `ttl_seconds`; grants nothing for any proposal of its request). The live-only `supplier-injection` scenario uses one `decline` rule; all other scenarios use `grant_approval`.
+
 Use a seeded generator only where needed and a synthetic UTC clock. Faults attach to semantic boundaries: before a named tool invocation, after a tool's transaction commits but before its response, or after a named event. Each fault has a stable ID, occurrence index, and maximum firing count persisted with the run. Wall-clock sleeps are not scenario controls.
 
 Allowlisted fault effects include timeout-before-commit, response-loss-after-commit, supplier suspension, approval revocation/expiry, policy version change, and scripted untrusted document content. User-defined Python, shell, and arbitrary network endpoints are out of scope.

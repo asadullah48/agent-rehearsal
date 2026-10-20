@@ -377,6 +377,15 @@ def _drive(
                     )
                     return
                 action = due[0]
+                if action.action == "decline":
+                    # A decline grants nothing; the reference controller can only wait.
+                    drive.close()
+                    store.finish_run(
+                        "paused",
+                        controller_state=controller.state.value,
+                        summary="reviewer declined by scenario rule; no approval granted",
+                    )
+                    return
                 pending.remove(action)
                 if saved["reply_json"] is not None:
                     reply = None

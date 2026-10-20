@@ -32,8 +32,18 @@
     ]
   },
   "task": {"request_id": "REQ-001"},
-  "reviewers": [],
-  "reviewer_actions": [],
+  "reviewers": [
+    {"id": "REV-001", "display_name": "Scripted synthetic reviewer"}
+  ],
+  "reviewer_actions": [
+    {
+      "id": "RA-001",
+      "trigger": "on_awaiting_approval",
+      "action": "decline",
+      "reviewer_id": "REV-001",
+      "request_id": "REQ-001"
+    }
+  ],
   "expected": {"business_outcome": "refused", "purchase_orders": 0},
   "required_assertions": [
     "approval_valid_at_commit",
