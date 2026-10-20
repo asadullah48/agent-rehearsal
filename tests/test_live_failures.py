@@ -23,10 +23,21 @@ httpx = pytest.importorskip("httpx")
 from anthropic.types import Message  # noqa: E402
 
 from agent_rehearsal.cli import main  # noqa: E402
-from agent_rehearsal.live import DecisionService, LiveModelController, usage_problem  # noqa: E402
+from agent_rehearsal.live import (  # noqa: E402
+    DecisionService,
+    LiveModelController,
+    decision_tools,
+    input_bound,
+    parse_tool_decision,
+    usage_problem,
+)
 from agent_rehearsal.live_budget import MODEL, BudgetLedger, Pricing, dollars, read_ledger  # noqa: E402
 from agent_rehearsal.live_eval import DEFAULT_PRICE, run_trials  # noqa: E402
-from agent_rehearsal.live_transport import AnthropicTransport, TransportFailure  # noqa: E402
+from agent_rehearsal.live_transport import (  # noqa: E402
+    AnthropicTransport,
+    TransportFailure,
+    validate_api_key,
+)
 from agent_rehearsal.runner import execute_run  # noqa: E402
 from agent_rehearsal.scenarios import load_scenario  # noqa: E402
 from agent_rehearsal.store import Store  # noqa: E402
@@ -56,8 +67,19 @@ def message(proposal=REFUSED, model=MODEL, **usage_changes):
             "type": "message",
             "role": "assistant",
             "model": model,
-            "content": [{"type": "text", "text": json.dumps(proposal)}],
-            "stop_reason": "end_turn",
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "toolu_test",
+                    "name": {
+                        "tool": "propose_tool_call",
+                        "review": "request_review",
+                        "finish": "finish",
+                    }[proposal["kind"]],
+                    "input": proposal,
+                }
+            ],
+            "stop_reason": "tool_use",
             "stop_sequence": None,
             "usage": usage(**usage_changes),
         }
@@ -342,17 +364,87 @@ def test_pre_reason_ledger_is_read_and_migrated(tmp_path):
         ledger.close()
 
 
-def test_installed_console_script_is_not_silent(tmp_path):
+@pytest.mark.parametrize("entrypoint", ["console", "module"])
+def test_installed_console_script_is_not_silent(tmp_path, entrypoint):
     exe = shutil.which("rehearsal", path=str(Path(sys.executable).parent))
     if exe is None:
         pytest.skip("rehearsal console script not installed in this environment")
     env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
     args = ["live-eval", "--trials", "1", "--budget-usd", "0.5"]
     args += ["--ledgers-dir", str(tmp_path / "ledgers")]
+    command = [exe] if entrypoint == "console" else [sys.executable, "-m", "agent_rehearsal.cli"]
     result = subprocess.run(
-        [exe, *args], capture_output=True, text=True, check=False, env=env, timeout=120
+        [*command, *args], capture_output=True, text=True, check=False, env=env, timeout=120
     )
     assert result.returncode == 0, result.stderr
     assert "[live-eval] start: estimate only" in result.stdout
     assert "no calls made" in result.stdout
     assert not (tmp_path / "ledgers").exists()
+
+
+@pytest.mark.parametrize(
+    "proposal",
+    [
+        {"kind": "tool", "tool": "get_request", "arguments": {"request_id": "REQ-001"}},
+        {"kind": "review", "request_id": "REQ-001"},
+        REFUSED,
+    ],
+)
+def test_native_decisions_with_realistic_sdk_blocks(proposal):
+    doc = message(proposal).model_dump(mode="json")
+    doc["content"].insert(0, {"type": "text", "text": "Untrusted commentary"})
+    assert parse_tool_decision(doc) == (proposal, proposal)
+    definitions = decision_tools()
+    assert all(t["input_schema"]["additionalProperties"] is False for t in definitions)
+    assert input_bound({"tools": definitions}) > input_bound({})
+
+
+@pytest.mark.parametrize(
+    "case", ["prose", "fenced", "invalid", "wrong_kind", "multiple", "unknown"]
+)
+def test_invalid_native_output_settles_and_reports_per_scenario(tmp_path, price, case):
+    doc = message().model_dump(mode="json")
+    if case in {"prose", "fenced"}:
+        text = "I will help with this."
+        if case == "fenced":
+            text = "```json\n" + json.dumps(REFUSED) + "\n```\nTrailing explanation."
+        doc.update(content=[{"type": "text", "text": text}], stop_reason="end_turn")
+    elif case == "invalid":
+        doc["content"][0]["input"] = REFUSED | {"state": "UNKNOWN", "extra": SECRET}
+    elif case == "wrong_kind":
+        doc["content"][0]["name"] = "request_review"
+    elif case == "multiple":
+        doc["content"] *= 2
+    else:
+        doc["content"][0]["name"] = "unknown"
+    progress = []
+    report = run_trials(
+        1,
+        "1",
+        tmp_path / "eval",
+        tmp_path / "ledger",
+        price,
+        transport=sdk_transport(Message.model_validate(doc)),
+        progress=progress.append,
+    )
+    assert all(t["stop_reason"] == "invalid_output" for t in report["trials"])
+    assert all(s["stop_reasons"]["invalid_output"] == 1 for s in report["scenarios"])
+    assert all(s["stop_reasons"]["error"] == 0 for s in report["scenarios"])
+    assert report["shared_ledger_total"]["actual_known_nano_usd"] == 2 * price.cost(100, 50)
+    assert any("invalid_output:" in line for line in progress)
+    assert_no_secret(tmp_path, *progress)
+
+
+@pytest.mark.parametrize(
+    ("key", "positions"),
+    [(" leading", "1"), ("trailing\n", "9"), ("bad.key", "4"), ("badékey", "4")],
+)
+def test_invalid_key_refused_before_sdk_import(monkeypatch, key, positions):
+    # Isolated fake environment, never installs a real credential.
+    monkeypatch.setattr("agent_rehearsal.live_transport.os.environ", {"ANTHROPIC_API_KEY": key})
+    with pytest.raises(ValueError) as info:
+        validate_api_key()
+    assert str(info.value).endswith(": " + positions)
+    assert key not in str(info.value)
+    with pytest.raises(ValueError):
+        AnthropicTransport()

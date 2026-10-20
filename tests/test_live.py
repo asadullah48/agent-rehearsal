@@ -54,9 +54,20 @@ def finish(state="FULFILLED"):
 def response(proposal):
     return {
         "model": MODEL,
-        "stop_reason": "end_turn",
+        "stop_reason": "tool_use",
         "usage": {"input_tokens": 100, "output_tokens": 50},
-        "content": [{"type": "text", "text": json.dumps(proposal)}],
+        "content": [
+            {
+                "type": "tool_use",
+                "id": "toolu_test",
+                "name": {
+                    "tool": "propose_tool_call",
+                    "review": "request_review",
+                    "finish": "finish",
+                }[proposal["kind"]],
+                "input": proposal,
+            }
+        ],
     }
 
 
@@ -135,6 +146,8 @@ def test_live_protocol_uses_gateway_and_independent_evaluator(tmp_path, price):
             "service_tier",
             "system",
             "messages",
+            "tools",
+            "tool_choice",
         }
         assert request["max_tokens"] == MAX_OUTPUT
         assert request["thinking"] == {"type": "disabled"}
@@ -658,11 +671,11 @@ def test_actual_cost_replaces_reservation_without_double_settlement(tmp_path):
 def test_malformed_proposal_charged_but_never_executed(tmp_path, price, invalid):
     def transport(request):
         doc = response(finish())
-        doc["content"][0]["text"] = invalid
+        doc["content"] = [{"type": "text", "text": invalid}]
         return doc
 
     result, cost = run_live(tmp_path, price, transport)
-    assert result.report["execution_status"] == "error"
+    assert result.report["execution_status"] == "invalid_output"
     assert result.report["tool_calls"] == []
     assert cost["actual_known_nano_usd"] == price.cost(100, 50)
 

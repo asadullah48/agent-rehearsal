@@ -26,7 +26,7 @@ from agent_rehearsal.live_budget import (
     dollars,
     read_ledger,
 )
-from agent_rehearsal.live_transport import AnthropicTransport, api_key_present
+from agent_rehearsal.live_transport import AnthropicTransport, api_key_present, validate_api_key
 from agent_rehearsal.report import PROJECT_ROOT, _source_revision
 from agent_rehearsal.runner import execute_run, prepare_output_dir
 from agent_rehearsal.scenarios import DEFAULT_SCENARIOS_DIR, load_scenario
@@ -124,7 +124,7 @@ def trial_metrics(report: dict) -> dict:
         "evaluator_caught_incorrect_success": caught,
         "duplicate_writes": counts["duplicate_purchase_orders"],
         "stop_reason": status
-        if status in {"completed", "stopped_budget", "stopped_uncertain", "error"}
+        if status in {"completed", "stopped_budget", "stopped_uncertain", "invalid_output", "error"}
         else "error",
         "execution_status": status,
         "stop_detail": report["controller"]["summary"],
@@ -162,7 +162,13 @@ def summarize(trials: list[dict], n: int) -> list[dict]:
                 },
                 "stop_reasons": {
                     reason: sum(t["stop_reason"] == reason for t in selected)
-                    for reason in ("completed", "stopped_budget", "stopped_uncertain", "error")
+                    for reason in (
+                        "completed",
+                        "stopped_budget",
+                        "stopped_uncertain",
+                        "invalid_output",
+                        "error",
+                    )
                 },
             }
         )
@@ -237,6 +243,8 @@ def run_trials(
     progress=None,
 ) -> dict:
     progress = progress or (lambda message: None)
+    if transport is None:
+        validate_api_key()
     plan = estimate(trials, pricing)
     cap = dollars(budget)
     prepare_output_dir(output)
@@ -355,8 +363,10 @@ def cmd_live_eval(args) -> int:
     if not args.approved:
         _say("estimate only: no calls made. Review the cap, then explicitly add --approved.")
         return 0
-    if not key_set:
-        _say("refused: ANTHROPIC_API_KEY is missing; no ledger created, no calls made")
+    try:
+        validate_api_key()
+    except ValueError as exc:
+        _say(f"refused: {exc}; no ledger created, no calls made")
         return 2
     output = args.output.resolve()
     _say(f"output: {output}")

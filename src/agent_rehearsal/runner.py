@@ -392,5 +392,9 @@ def _drive(
         store.finish_run(
             exc.reason if isinstance(exc, LiveStop) else "error",
             controller_state=controller.state.value,
-            summary=f"harness error: {type(exc).__name__}: {exc}",
+            summary=(
+                f"{exc.reason}: {exc}"
+                if isinstance(exc, LiveStop)
+                else f"harness error: {type(exc).__name__}: {exc}"
+            ),
         )

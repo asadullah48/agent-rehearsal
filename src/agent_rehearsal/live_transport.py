@@ -11,6 +11,21 @@ def api_key_present() -> bool:
     return bool(os.environ.get("ANTHROPIC_API_KEY"))
 
 
+def validate_api_key() -> None:
+    """Reject malformed keys without disclosing any characters (positions are 1-based)."""
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        raise ValueError("ANTHROPIC_API_KEY is missing")
+    positions = [
+        str(i) for i, char in enumerate(key, 1) if not re.fullmatch(r"[A-Za-z0-9_-]", char)
+    ]
+    if positions:
+        raise ValueError(
+            "ANTHROPIC_API_KEY has invalid characters at positions (1-based): "
+            + ", ".join(positions)
+        )
+
+
 class TransportFailure(Exception):
     """Credential-free description of a failed dispatch: class, status, request id only.
 
@@ -60,8 +75,7 @@ class AnthropicTransport:
     """Lazy optional SDK; fixed endpoint, no environment-selected gateway or retries."""
 
     def __init__(self):
-        if not os.environ.get("ANTHROPIC_API_KEY"):
-            raise ValueError("ANTHROPIC_API_KEY is required for an approved live run")
+        validate_api_key()
         from anthropic import Anthropic
 
         self.client = Anthropic(
@@ -72,7 +86,7 @@ class AnthropicTransport:
         )
 
     def __call__(self, request: dict) -> dict:
-        # No tools, cache_control, batch, beta features, streaming, or enabled thinking.
+        # Client decision tools only; no caching, server tools, streaming or enabled thinking.
         try:
             message = self.client.messages.create(**request)
         except Exception as exc:

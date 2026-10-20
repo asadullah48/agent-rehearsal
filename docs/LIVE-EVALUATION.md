@@ -21,13 +21,17 @@ success or regenerate accepted decisions.
 
 One provider: Anthropic's direct Claude API. One pinned model:
 `claude-haiku-4-5-20251001`. Temperature 0; prompt version
-`procurement-proposal-v1`; at most 30 model calls per trial. The optional
+`procurement-native-tools-v2` (controller version 2); at most 30 model calls per trial. The optional
 `anthropic` SDK uses `max_retries=0`, a fixed API endpoint and a 60-second timeout.
 No automatic or application retry exists in v1. Any future retry must get its own
 atomic reservation before dispatch.
 
-Messages contain text only. The response is one JSON tool proposal, review request,
-or terminal state claim. No provider tool definitions, server tools, web search,
+The request defines three client decision tools: `propose_tool_call`, `request_review`,
+and `finish`, with JSON schemas generated from the existing strict Pydantic models.
+`tool_choice` is `any`, with parallel tool use disabled. Only the single `tool_use`
+block's input is validated against its named decision model; prose and fenced JSON
+are never parsed. Additional text alongside a valid tool block is ignored. Tool definitions
+are included in the bounded input estimate. No server tools, web search,
 batch calls, cache-control options, or enabled thinking are sent. `standard_only`
 service tier excludes automatic priority selection. Both automatic prompt caching
 and explicit cache breakpoints are omitted. The terminal state remains a claim,
@@ -39,6 +43,7 @@ Sources checked 2026-10-20:
 - [SDK retries](https://platform.claude.com/docs/en/cli-sdks-libraries/sdks/python)
 - [Caching opt-in parameters](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)
 - [Service tiers](https://platform.claude.com/docs/en/api/service-tiers)
+- [Native tool use](https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview)
 
 ## Application-enforced spending bound
 
@@ -153,9 +158,12 @@ The aggregate and each trial separately retain:
 - Incorrect success claims and whether the evaluator caught them (including
   authorization and uniqueness failures as well as `expected_business_outcome`).
 - Duplicate persisted writes, all evaluator assertions, and every failing trial.
-- Stop reason: completed / stopped_budget / stopped_uncertain / error, plus the
+- Stop reason: completed / stopped_budget / stopped_uncertain / invalid_output / error, plus the
   underlying execution status and explanation. A paused review is reported as
   error/incomplete in this batch interface, never as completed.
+- `invalid_output` counts model/protocol failures separately from harness errors.
+  Known usage is settled first; missing, multiple, unknown or invalid decision blocks
+  stop the trial with a credential-safe explanation.
 - Reserved, known actual and charged costs; pinned model; UTC timestamp; commit SHA
   and dirty-working-tree status. A SHA with a dirty tree is not an exact code artifact.
 
@@ -192,6 +200,16 @@ The command always prints a start line, `API key: set` or `missing` (never the
 value), the ledger path and cap, per-call reservation and settlement, each trial's
 stop reason and verdict, cost totals, the report path and its exit code. Exit codes:
 0 all trials passed, 1 some trials failed or stopped, 2 refused or aborted.
+
+Before a live run creates output or a ledger, the key must contain only
+`[A-Za-z0-9_-]`. Whitespace and other invalid characters are reported by 1-based
+position only, never by value. The transport also validates before constructing the SDK.
+
+Both `.venv\Scripts\rehearsal.exe` and
+`.venv\Scripts\python.exe -m agent_rehearsal.cli` invoke the same `main`.
+Both entry points have offline subprocess regression coverage. The reported silent
+console exit was not reproducible on this checkout; the installed launcher correctly
+imports and calls `main`, and the module guard is already present.
 
 The `--approved` flag is the operator's explicit opt-in, not proof of a provider
 billing limit. Existing ledger caps cannot be raised by another command. Do not
