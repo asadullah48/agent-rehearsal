@@ -14,6 +14,7 @@ from agent_rehearsal.live import (
     MAX_CALLS,
     MAX_INPUT,
     MAX_OUTPUT,
+    PROMPT_VERSION,
     DecisionService,
     LiveModelController,
 )
@@ -32,6 +33,15 @@ from agent_rehearsal.runner import execute_run, prepare_output_dir
 from agent_rehearsal.scenarios import DEFAULT_SCENARIOS_DIR, load_scenario
 
 DEFAULT_PRICE = PROJECT_ROOT / "config" / "live-pricing.json"
+# review_unhandled is a harness/scenario gap, counted apart from model failures.
+STOP_REASONS = (
+    "completed",
+    "stopped_budget",
+    "stopped_uncertain",
+    "invalid_output",
+    "review_unhandled",
+    "error",
+)
 # Each evaluation gets its own ledger here unless --ledger names one; calls within one
 # evaluation share it. Every ledger used is appended to the registry for live-spend.
 DEFAULT_LEDGERS_DIR = PROJECT_ROOT / ".rehearsal" / "ledgers"
@@ -123,9 +133,7 @@ def trial_metrics(report: dict) -> dict:
         "incorrect_success_claim": false_claim,
         "evaluator_caught_incorrect_success": caught,
         "duplicate_writes": counts["duplicate_purchase_orders"],
-        "stop_reason": status
-        if status in {"completed", "stopped_budget", "stopped_uncertain", "invalid_output", "error"}
-        else "error",
+        "stop_reason": status if status in STOP_REASONS else "error",
         "execution_status": status,
         "stop_detail": report["controller"]["summary"],
         "evaluation_verdict": report["verdict"],
@@ -162,13 +170,7 @@ def summarize(trials: list[dict], n: int) -> list[dict]:
                 },
                 "stop_reasons": {
                     reason: sum(t["stop_reason"] == reason for t in selected)
-                    for reason in (
-                        "completed",
-                        "stopped_budget",
-                        "stopped_uncertain",
-                        "invalid_output",
-                        "error",
-                    )
+                    for reason in STOP_REASONS
                 },
             }
         )
@@ -307,6 +309,8 @@ def run_trials(
             "provenance": "mock" if injected else "live",
             "date": datetime.now(UTC).isoformat(),
             "model": MODEL,
+            # One module constant per process: every trial in this report used it.
+            "prompt_version": PROMPT_VERSION,
             "commit_sha": _source_revision(),
             "working_tree_dirty": bool(dirty.stdout.strip()) if dirty.returncode == 0 else None,
             "trials_per_scenario": trials,

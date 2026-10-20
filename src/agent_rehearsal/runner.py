@@ -27,6 +27,7 @@ from agent_rehearsal.evaluator import Evaluation, evaluate_run
 from agent_rehearsal.evidence import export_bundle, recover_export
 from agent_rehearsal.live import DecisionService, LiveModelController
 from agent_rehearsal.live_budget import LiveStop
+from agent_rehearsal.live_review import LiveReviewer
 from agent_rehearsal.models import Actor, ToolResult
 from agent_rehearsal.policy import KNOWN_POLICIES
 from agent_rehearsal.privileged import ReviewerConsole, ScenarioConsole
@@ -259,10 +260,14 @@ def _drive(
                             "SELECT * FROM requests WHERE id = ?", (scenario.task.request_id,)
                         )[0]
                         if fault.effect == "approval_revocation":
-                            approval = store.rows(
-                                "SELECT * FROM approvals WHERE id = ?",
-                                (decision.arguments["approval_id"],),
-                            )[0]
+                            # Target from world state, never from controller arguments.
+                            approval = store.row(
+                                "SELECT * FROM approvals WHERE request_id = ? "
+                                "AND revoked_at IS NULL ORDER BY granted_at DESC, id DESC",
+                                (req["id"],),
+                            )
+                            if approval is None:
+                                continue  # Nothing to revoke: the fault does not fire.
                             event_id = consoles[approval["reviewer_id"]].revoke_approval(
                                 approval["id"]
                             )
@@ -348,6 +353,16 @@ def _drive(
                 if decision.tool == "create_purchase_order":
                     crash_if(crash_at, "after-purchase-response")
             elif isinstance(decision, AwaitReview):
+                if isinstance(controller, LiveModelController):
+                    reply = (
+                        ToolResult.model_validate_json(saved["reply_json"])
+                        if saved["reply_json"] is not None
+                        else LiveReviewer(store, scenario).review(
+                            decision.request_id, saved["step"]
+                        )
+                    )
+                    decisions.complete(reply)
+                    continue
                 due = [
                     a
                     for a in pending

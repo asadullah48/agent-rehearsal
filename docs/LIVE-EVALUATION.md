@@ -21,7 +21,9 @@ success or regenerate accepted decisions.
 
 One provider: Anthropic's direct Claude API. One pinned model:
 `claude-haiku-4-5-20251001`. Temperature 0; prompt version
-`procurement-native-tools-v2` (controller version 2); at most 30 model calls per trial. The optional
+`procurement-native-tools-v3` (controller version 3); at most 30 model calls per trial.
+One prompt version is a module constant, so every trial of an evaluation uses it; the
+live report records it as `prompt_version`. The optional
 `anthropic` SDK uses `max_retries=0`, a fixed API endpoint and a 60-second timeout.
 No automatic or application retry exists in v1. Any future retry must get its own
 atomic reservation before dispatch.
@@ -141,6 +143,26 @@ Each run database has one harness writer. Concurrent trials use separate run
 databases and the shared budget ledger; simultaneous recovery of the same run is
 not supported.
 
+## Scenario reviewer for live runs
+
+Deterministic and scripted runs keep the step-indexed scripted reviewer. A live run
+instead answers each `request_review` from the scenario only (`live_review.py`). Its
+sole model-derived input is the structured `request_id`; model text is never read.
+A scenario `reviewer_actions` entry for that request is a rule, not a one-shot step:
+it approves only when every bound field of the current request (request, supplier,
+budget, amount, currency, description) and the proposal digest equal the scenario's
+initial-world proposal under the scenario policy version, with the rule's TTL.
+Anything else is rejected and grants nothing. A valid approval is reused; a revoked
+or expired one is rejected with that reason and never renewed. Scenario revocation
+faults fire at their defined boundary against the request's active approval, chosen
+from world state rather than from controller arguments.
+
+Each decision commits with any grant in one transaction as a `review.decided` event
+recording the rule, expected and observed digests, mismatched fields and reason; its
+payload is the model's result for the review request. Recovery replays it. A review
+request with no rule (or ambiguous rules) records `decision: unhandled` and stops the
+trial as `review_unhandled`, a harness/scenario gap counted apart from model failures.
+
 ## Metrics and injection fixture
 
 Each of the two scenarios runs N times. The supplier-injection fixture includes
@@ -158,9 +180,10 @@ The aggregate and each trial separately retain:
 - Incorrect success claims and whether the evaluator caught them (including
   authorization and uniqueness failures as well as `expected_business_outcome`).
 - Duplicate persisted writes, all evaluator assertions, and every failing trial.
-- Stop reason: completed / stopped_budget / stopped_uncertain / invalid_output / error, plus the
-  underlying execution status and explanation. A paused review is reported as
-  error/incomplete in this batch interface, never as completed.
+- Stop reason: completed / stopped_budget / stopped_uncertain / invalid_output /
+  review_unhandled / error, plus the underlying execution status and explanation.
+  A paused review is reported as error/incomplete in this batch interface, never as
+  completed.
 - `invalid_output` counts model/protocol failures separately from harness errors.
   Known usage is settled first; missing, multiple, unknown or invalid decision blocks
   stop the trial with a credential-safe explanation.
