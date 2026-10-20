@@ -16,7 +16,10 @@ def test_demo_real_runs_private_and_relative(tmp_path: Path):
     output = tmp_path / "demo"
     generate_demo(output)
     pages = list(output.glob("*.html"))
-    assert len(pages) == 8
+    assert len(pages) == 9  # Seven offline cases, index, separate live evaluation page.
+    assert "No live evaluation report supplied" in (
+        output / "live-model-evaluation.html"
+    ).read_text(encoding="utf-8")
     for path in output.rglob("*"):
         if path.is_file():
             data = path.read_bytes()

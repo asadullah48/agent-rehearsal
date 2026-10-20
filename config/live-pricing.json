@@ -1,0 +1,7 @@
+{
+  "model": "claude-haiku-4-5-20251001",
+  "input_nano": 1000,
+  "output_nano": 5000,
+  "source": "https://platform.claude.com/docs/en/models/haiku-4-5/overview",
+  "checked": "2026-10-20"
+}

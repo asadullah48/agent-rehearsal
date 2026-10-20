@@ -25,6 +25,8 @@ from agent_rehearsal.controller import (
 )
 from agent_rehearsal.evaluator import Evaluation, evaluate_run
 from agent_rehearsal.evidence import export_bundle, recover_export
+from agent_rehearsal.live import DecisionService, LiveModelController
+from agent_rehearsal.live_budget import LiveStop
 from agent_rehearsal.models import Actor, ToolResult
 from agent_rehearsal.policy import KNOWN_POLICIES
 from agent_rehearsal.privileged import ReviewerConsole, ScenarioConsole
@@ -73,6 +75,7 @@ def execute_run(
     crash_at: str | None = None,
     crash_during_export: str | None = None,
     controller: Controller | None = None,
+    live_service_factory=None,
 ) -> RunResult:
     """Run an already validated scenario. Callers must validate input first."""
     wall_start = time.perf_counter()
@@ -90,7 +93,15 @@ def execute_run(
         with store.transaction() as tx:
             tx.set_meta("adapter_configuration", canonical_json(controller.configuration))
     sync_ledger(store)
+    service = None
     try:
+        if isinstance(controller, LiveModelController):
+            if live_service_factory is None:
+                raise ValueError(
+                    "live controller requires an explicitly configured decision service"
+                )
+            service = live_service_factory(store)
+            controller.request_decision = service
         _drive(
             store,
             scenario,
@@ -101,6 +112,12 @@ def execute_run(
             controller=controller,
         )
     finally:
+        if service is not None and service.ledger is not None:
+            with store.transaction() as tx:
+                tx.set_meta(
+                    "live_cost",
+                    canonical_json(service.ledger.summary(store.meta("run_id"))),
+                )
         store.close()
 
     wall_ms = round((time.perf_counter() - wall_start) * 1000, 3)
@@ -126,6 +143,13 @@ def resume_run(output: Path, *, crash_during_export: str | None = None) -> RunRe
             controller = ScriptedController(parse_script(store.meta("adapter_configuration")))
             if controller.metadata != adapter:
                 raise ValueError("persisted scripted adapter metadata mismatch")
+        elif adapter["id"] == "live-anthropic":
+            controller = LiveModelController.from_configuration(
+                json.loads(store.meta("adapter_configuration"))
+            )
+            if controller.metadata != adapter:
+                raise ValueError("unsupported live adapter version for recovery")
+            controller.request_decision = DecisionService(store, replay_only=True)
         elif adapter != ADAPTER:
             raise ValueError("unsupported adapter version for recovery")
         if store.meta("execution_status") == "running":
@@ -168,7 +192,10 @@ def _drive(
     actor = (
         CONTROLLER_ACTOR
         if controller.metadata["id"] == ADAPTER["id"]
-        else Actor(actor_id="CTRL-SCRIPT", role="controller")
+        else Actor(
+            actor_id="CTRL-LIVE" if isinstance(controller, LiveModelController) else "CTRL-SCRIPT",
+            role="controller",
+        )
     )
     gateway = ToolGateway(store, actor)
     consoles = {
@@ -363,7 +390,7 @@ def _drive(
         drive.close()
         journal()
         store.finish_run(
-            "error",
+            exc.reason if isinstance(exc, LiveStop) else "error",
             controller_state=controller.state.value,
             summary=f"harness error: {type(exc).__name__}: {exc}",
         )

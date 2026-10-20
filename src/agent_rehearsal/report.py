@@ -39,7 +39,8 @@ EXECUTION_MODES = {
     "no tool, controller or model. It is not crash recovery or durable execution.",
     "deterministic_rerun": "`run` again with the same scenario and seed starts a new world from "
     "the same fixture; its canonical semantic trace should equal this one.",
-    "live_rerun": "not available in Session 1 (no live model adapter exists).",
+    "live_rerun": "live-eval is manual and opt-in; a rerun spends budget on new decisions. "
+    "Live resume only replays persisted accepted decisions and refuses an unsaved frontier.",
 }
 
 
@@ -176,9 +177,19 @@ def build_report(db_path: Path, evaluation: Evaluation, *, wall_clock_ms: float)
             "simulated_finished_at": meta["now"],
             "simulated_elapsed_seconds": int((end - start).total_seconds()),
             "proposed_actions": sum(1 for c in tool_calls if c["actor_role"] == "controller"),
-            "model_calls": 0,
-            "provider_token_usage": "not_applicable",
-            "estimated_model_cost": "not_applicable (offline deterministic controller)",
+            "model_calls": json.loads(meta.get("live_cost", "{}")).get("calls", 0),
+            "provider_token_usage": [
+                e["payload"]["usage"]
+                for e in events
+                if e["event_type"] == "model.response_received"
+            ]
+            if adapter.get("live_model")
+            else "not_applicable",
+            "estimated_model_cost": (
+                json.loads(meta.get("live_cost", "{}"))
+                if adapter.get("live_model")
+                else "not_applicable (offline deterministic controller)"
+            ),
         },
         "counts": evaluation.counts,
         "evaluation": evaluation.to_dict(),

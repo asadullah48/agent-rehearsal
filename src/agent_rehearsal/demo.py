@@ -176,6 +176,8 @@ def render_index(cases: list[tuple[str, dict, str]]) -> str:
         "<p>Select a predefined, already-executed case. Selection only opens saved evidence.</p>"
         "<p>Execution status, business outcome and independent verdict are distinct. "
         "Expected refusal with PASS is different from evaluation FAIL.</p>"
+        '<p><a href="live-model-evaluation.html">Live model evaluation</a> '
+        "(separate from these offline runs).</p>"
     )
     for scripted, heading in (
         (True, "Evaluator catches a bad agent"),
@@ -194,7 +196,7 @@ def render_index(cases: list[tuple[str, dict, str]]) -> str:
     return _page("Agent Rehearsal - recorded demo", body)
 
 
-def generate_demo(output: Path) -> None:
+def generate_demo(output: Path, live_report: Path | None = None) -> None:
     """Refuse overwrite; keep complete original bundles beside their static views."""
     prepare_output_dir(output)
     cases = [(s.id, s, None, s.description) for s in list_scenarios()]
@@ -224,13 +226,34 @@ def generate_demo(output: Path) -> None:
         rendered.append((slug, report, summary))
         (output / f"{slug}.html").write_text(render_case(slug, report, summary), encoding="utf-8")
     (output / "index.html").write_text(render_index(rendered), encoding="utf-8")
+    if live_report is not None:
+        from agent_rehearsal.live_eval import render_live_report
+
+        document = json.loads(live_report.read_text(encoding="utf-8"))
+        live_page = render_live_report(document)
+        (output / "live-report.json").write_text(
+            json.dumps(document, indent=2) + "\n", encoding="utf-8"
+        )
+    else:
+        live_page = _page(
+            "Live model evaluation",
+            "<p>No live evaluation report supplied. No live-model results are claimed.</p>"
+            "<p>The existing cases are scripted or deterministic offline runs.</p>"
+            "<h2>Evaluation status</h2>"
+            "<details><summary>Recorded status</summary><pre>"
+            '{"live_trials": 0, "status": "not_run"}'
+            "</pre></details>"
+            '<p><a href="index.html">Recorded offline cases</a></p>',
+        )
+    (output / "live-model-evaluation.html").write_text(live_page, encoding="utf-8")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--live-report", type=Path, help="saved live-eval report; no API calls")
     args = parser.parse_args()
-    generate_demo(args.output)
+    generate_demo(args.output, args.live_report)
     print("Generated static demo and seven offline evidence bundles (one intentional FAIL).")
 
 

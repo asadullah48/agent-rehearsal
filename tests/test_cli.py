@@ -153,7 +153,7 @@ def test_run_ignores_a_present_env_file(tmp_path, monkeypatch):
     assert main(["run", "--scenario", "happy-path", "--seed", "42", "--output", "out"]) == 0
 
 
-def test_source_has_no_network_credential_or_env_access():
+def test_only_opt_in_transport_has_network_credential_or_env_access():
     forbidden = re.compile(
         r"^\s*(import|from)\s+(socket|urllib|http|requests|httpx|dotenv|anthropic|openai)\b"
         r"|os\.environ|getenv\(|load_dotenv|\.env\b",
@@ -162,6 +162,7 @@ def test_source_has_no_network_credential_or_env_access():
     hits = [
         f"{p.name}: {m.group(0).strip()}"
         for p in SRC.glob("*.py")
+        if p.name != "live_transport.py"
         for m in forbidden.finditer(p.read_text(encoding="utf-8"))
     ]
     assert hits == []

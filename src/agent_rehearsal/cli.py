@@ -206,6 +206,16 @@ def build_parser() -> argparse.ArgumentParser:
         "and an independent evaluator. Synthetic data only.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
+    from agent_rehearsal.live_eval import DEFAULT_LEDGER, DEFAULT_PRICE, cmd_live_eval
+
+    live = sub.add_parser("live-eval", help="manual opt-in live evaluation; estimates by default")
+    live.add_argument("--trials", type=int, required=True)
+    live.add_argument("--budget-usd", required=True)
+    live.add_argument("--approved", action="store_true", help="explicit approval of displayed cap")
+    live.add_argument("--pricing", type=Path, default=DEFAULT_PRICE)
+    live.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
+    live.add_argument("--output", type=Path, default=Path(".rehearsal/live-eval"))
+    live.set_defaults(func=cmd_live_eval)
 
     scen = sub.add_parser("scenarios", help="scenario catalog")
     scen_sub = scen.add_subparsers(dest="scenarios_command", required=True)

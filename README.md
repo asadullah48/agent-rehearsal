@@ -4,10 +4,13 @@ An offline simulator and independent evaluator that checks whether a tool-using
 controller preserves **approval**, **idempotency** and **budget** invariants in a
 fictional procurement workflow.
 
-> **Status: Session 4 (static recorded demo; local recovery and offline controllers).**
+> **Status: offline reference demo plus an opt-in live evaluation path.**
 > Two offline controllers ship: a **deterministic reference controller (not an AI agent)** and a
 > **scripted offline decision replay**. Both make **zero model calls**. Nothing
-> here demonstrates the behavior of a live LLM agent.
+> in those runs demonstrates the behavior of a live LLM agent.
+> The optional `LiveModelController` proposes actions through the same gateway.
+> No live evaluation results are claimed until an approved run produces a report.
+> See [live evaluation and spending assumptions](docs/LIVE-EVALUATION.md).
 >
 > Synthetic data only. Evidence is **tamper-evident (not tamper-proof)**;
 > retain a trusted digest outside the writable bundle. Licensed under [MIT](LICENSE).
@@ -59,7 +62,8 @@ python -m pip install -e ".[dev]"
 Versions resolved during Session 1: pydantic 2.14.1 (pydantic_core 2.50.1),
 pytest 9.1.1, ruff 0.17.1. The runtime dependency is pydantic only; SQLite and
 argparse come from the standard library. Once installed, runs and tests need no
-network, API key or `.env` file.
+network, API key or `.env` file for offline commands and tests. Live evaluation
+requires the separate `.[live]` extra and `ANTHROPIC_API_KEY`.
 
 The default scenario directory is located relative to the source tree, so use
 the editable install shown above. Otherwise pass `--scenarios-dir`.
@@ -94,7 +98,7 @@ report. For `replay`, `0` means the playback matched the report.
 | Recorded playback | `replay` | Reads saved evidence only |
 | Deterministic rerun | `run` with the same scenario and seed | Equal canonical semantic trace |
 | Local recovery | `resume` | Reconstructs controller state from durable decisions/replies; continues the same SQLite world |
-| Live rerun | unavailable | No live model adapter ships |
+| Live rerun | `rehearsal live-eval` | Explicit opt-in; new paid decisions under a shared cap |
 
 The canonical semantic trace is `report.json` with these fields removed:
 `metadata.run_id`, `metadata.source_revision`, `metadata.python_version`,
@@ -209,13 +213,13 @@ reject unknown fields and invalid transitions before creating the world; tool
 arguments still pass through the existing gateway. Script decisions and their hash
 are persisted, so resume does not need the original JSON file.
 
-A future live model adapter can implement the same protocol behind an explicit
-opt-in entry point, producing typed proposals and recording actual model identity,
-usage and limits. Its SDK/configuration must load only on that opt-in path; offline
-runs and tests must remain independent. No live adapter, SDK, keys, network path,
-or hard spend guarantee is implemented. This Python protocol is an interface, not
-a sandbox for untrusted adapter code. Nondeterministic adapters would need their
-own replay/version contract before recovery could be claimed.
+`LiveModelController` implements this protocol behind `live-eval --approved`.
+The harness persists accepted model decisions before gateway execution. Live resume
+replays those decisions without calling the model and refuses an unsaved frontier.
+The optional SDK loads only for approved live evaluation; CI remains offline.
+Spending is application-enforced under documented assumptions, not a guarantee
+of provider billing. This Python protocol is an interface, not a sandbox for
+untrusted adapter code. See [the live contract](docs/LIVE-EVALUATION.md).
 
 - **Trusted identity.** The harness binds each gateway or console to an `Actor`.
   Tool arguments are strict schemas that reject unknown fields, so a
@@ -279,13 +283,13 @@ connections and `.env` reads. No runtime or development dependencies were added.
 
 ## Limits / non-goals
 
-- **No live AI agent.** Passing these scenarios shows only that this harness and its
+- **Offline results are not live evidence.** Passing the existing scenarios shows only that this harness and its
   two offline controllers behave as specified on the shipped synthetic fixtures. It says
   nothing about how an LLM agent would behave, and it does not show that unseen
   cases are safe.
 - **Bounded offline scope.** The three core disruptions and local evidence
   bundle work. There is no API server, MCP adapter, decision forks,
-  authentication, billing, deployment or external integration. Expiry, policy
+  authentication, customer billing, deployment or external business integration. Expiry, policy
   changes, failed compensation remain backlog. Named local process-crash recovery is covered below.
 - **Bounded local recovery.** Real subprocess termination is tested at six workflow
   boundaries and seven export boundaries. This is not a guarantee against arbitrary
