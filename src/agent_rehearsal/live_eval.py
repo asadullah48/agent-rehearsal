@@ -362,7 +362,8 @@ def cmd_live_eval(args) -> int:
             f"already charged ${existing['charged_nano_usd'] / 1e9:.6f})"
         )
     else:
-        _say(f"ledger: new {ledger} (cap ${cap / 1e9:.6f})")
+        ledger_state = "new" if args.approved else "planned"
+        _say(f"ledger: {ledger_state} {ledger} (cap ${cap / 1e9:.6f})")
     print(json.dumps(plan, indent=2), flush=True)
     if not args.approved:
         _say("estimate only: no calls made. Review the cap, then explicitly add --approved.")

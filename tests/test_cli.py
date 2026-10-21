@@ -14,10 +14,33 @@ import pytest
 
 import agent_rehearsal
 from agent_rehearsal.cli import main
+from agent_rehearsal.scenarios import DEFAULT_SCENARIOS_DIR
 from conftest import scenario_doc
 from corruption import tamper
 
 SRC = Path(agent_rehearsal.__file__).parent
+
+
+def test_deterministic_cli_skips_live_only_scenario(tmp_path, capsys):
+    output = tmp_path / "live-only"
+    code = main(
+        [
+            "run",
+            "--scenario",
+            "supplier-injection",
+            "--seed",
+            "42",
+            "--scenarios-dir",
+            str(DEFAULT_SCENARIOS_DIR / "live"),
+            "--output",
+            str(output),
+        ]
+    )
+    stdout = capsys.readouterr().out
+    assert code == 2  # not an evaluated pass or failure
+    assert "Evaluation verdict: live_only_not_evaluated" in stdout
+    assert "Evaluation verdict: fail" not in stdout
+    assert not output.exists()
 
 
 def cli(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:

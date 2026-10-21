@@ -74,6 +74,15 @@ def cmd_run(args: argparse.Namespace) -> int:
         scenario = load_scenario(args.scenario, args.scenarios_dir)  # before any world exists
     except ScenarioError as exc:
         return _err(str(exc))
+    if (
+        args.adapter == "reference"
+        and args.scenarios_dir.resolve() == (DEFAULT_SCENARIOS_DIR / "live").resolve()
+    ):
+        print(LABEL)
+        print(f"Scenario: {scenario.id} ({scenario.catalog_id}) seed={args.seed}")
+        print("Evaluation verdict: live_only_not_evaluated")
+        print("Live-only scenario: deterministic CLI execution skipped; no run created.")
+        return EXIT_INVALID
     output: Path = args.output
     try:
         if output.exists() and (not output.is_dir() or any(output.iterdir())):

@@ -504,6 +504,22 @@ def refusing_transport():
     return RecordedTransport([finish("REFUSED"), finish("REFUSED")])
 
 
+@pytest.mark.parametrize("approved", [False, True])
+def test_new_ledger_message_distinguishes_plan_from_mocked_run(
+    tmp_path, monkeypatch, capsys, approved
+):
+    fake_sdk(monkeypatch, refusing_transport())
+    args = approved_args(tmp_path)
+    if not approved:
+        args.remove("--approved")
+    assert main(args) == (1 if approved else 0)
+    stdout = capsys.readouterr().out
+    state = "new" if approved else "planned"
+    assert f"ledger: {state} {(tmp_path / 'ledger.sqlite').resolve()}" in stdout
+    assert (tmp_path / "ledger.sqlite").exists() is approved
+    assert (tmp_path / "output").exists() is approved
+
+
 def test_smoke_and_main_evaluations_use_separate_locked_ledgers(tmp_path, monkeypatch, capsys):
     fake_sdk(monkeypatch, refusing_transport())
     assert main(approved_args(tmp_path, "0.5", "smoke.sqlite", "smoke")) == 1
