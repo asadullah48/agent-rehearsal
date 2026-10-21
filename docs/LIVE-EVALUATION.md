@@ -258,10 +258,14 @@ Total recorded spend across every ledger (read-only; opens each ledger with
 rehearsal live-spend
 ```
 
-Build a static demo from the saved report (no provider calls):
+Build a static demo from the saved report (no provider calls). The published
+GitHub Pages live page is generated from the tracked evidence file
+`evidence/live-eval-2026-10-20.json`, a byte-for-byte copy of the 2026-10-20 run's
+`live-report.json` (SHA-256 pinned by `tests/test_published_evidence.py`; the
+measured commit is tagged `live-eval-2026-10-20`):
 
 ```powershell
-.\.venv\Scripts\python.exe -m agent_rehearsal.demo --output .rehearsal/pages-live --live-report .rehearsal/live-eval-001/live-report.json
+.\.venv\Scripts\python.exe -m agent_rehearsal.demo --output .rehearsal/pages-live --live-report evidence/live-eval-2026-10-20.json
 ```
 
 Without `--live-report`, the live page says no live results are available. With a

@@ -1,0 +1,2 @@
+# Live-eval evidence is hash-pinned: store and check out byte for byte.
+evidence/*.json -text

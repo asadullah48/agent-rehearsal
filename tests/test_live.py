@@ -33,6 +33,7 @@ from agent_rehearsal.live_budget import (
 from agent_rehearsal.live_eval import (
     DEFAULT_PRICE,
     estimate,
+    render_limits,
     render_live_report,
     run_trials,
     trial_metrics,
@@ -625,6 +626,33 @@ def test_repeated_report_preserves_failures_and_mock_label(tmp_path, price):
     assert "Live model evaluation" in html
     assert "expected_business_outcome" in html
     assert estimate(2, price)["maximum_calls"] == 120
+
+
+def limits_report(scenarios, passed=0, failed=0):
+    summary = {"trials": 2, "enforcement_passed": passed, "enforcement_failed": failed}
+    return {
+        "trials_per_scenario": 2,
+        "trials": [{}] * (2 * len(scenarios)),
+        "scenarios": [
+            summary | {"scenario": s, "enforcement_not_exercised": 2 - passed - failed}
+            for s in scenarios
+        ],
+    }
+
+
+def test_limits_state_sample_and_unexercised_enforcement():
+    html = render_limits(limits_report(["happy-path", "supplier-injection"]))
+    assert "Limits of this run" in html
+    assert "Small sample: 2 trials per scenario (4 trials, one model" in html
+    assert "Enforcement not exercised: in 4 of 4 trials" in html
+    assert "(rule RA-001), so task completed 0 / 2 is the expected outcome" in html
+
+
+def test_limits_omit_scenario_note_and_report_exercised_enforcement():
+    html = render_limits(limits_report(["happy-path"], passed=1, failed=1))
+    assert "RA-001" not in html
+    assert "Enforcement not exercised" not in html
+    assert "Enforcement exercised in 2 of 2 trials (1 passed, 1 failed)" in html
 
 
 def test_sdk_configuration_disables_retries_and_fixes_endpoint(monkeypatch):

@@ -30,7 +30,7 @@ jobs:
           python -m ruff check .
           python -m ruff format --check .
       - name: Generate recorded viewer and evidence bundles
-        run: python -m agent_rehearsal.demo --output .rehearsal/pages
+        run: python -m agent_rehearsal.demo --output .rehearsal/pages --live-report evidence/live-eval-2026-10-20.json
       - name: Configure Pages (must already be enabled by owner)
         uses: actions/configure-pages@v5
         with:
