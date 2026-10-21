@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 from html import escape
 from pathlib import Path
 
@@ -231,9 +232,8 @@ def generate_demo(output: Path, live_report: Path | None = None) -> None:
 
         document = json.loads(live_report.read_text(encoding="utf-8"))
         live_page = render_live_report(document)
-        (output / "live-report.json").write_text(
-            json.dumps(document, indent=2) + "\n", encoding="utf-8"
-        )
+        # Byte copy, not re-serialized: the download must match the pinned evidence hash.
+        shutil.copyfile(live_report, output / "live-report.json")
     else:
         live_page = _page(
             "Live model evaluation",

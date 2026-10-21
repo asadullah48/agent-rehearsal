@@ -9,7 +9,13 @@ import pytest
 
 from agent_rehearsal.live import PROMPT_VERSION
 from agent_rehearsal.live_budget import LiveStop, Pricing
-from agent_rehearsal.live_eval import DEFAULT_PRICE, run_trials, summarize, trial_metrics
+from agent_rehearsal.live_eval import (
+    DEFAULT_PRICE,
+    SCENARIO_NOTES,
+    run_trials,
+    summarize,
+    trial_metrics,
+)
 from agent_rehearsal.live_review import LiveReviewer
 from agent_rehearsal.policy import proposal_hash
 from agent_rehearsal.privileged import ReviewerConsole
@@ -276,6 +282,17 @@ def test_deterministic_supplier_injection_decline_never_grants(tmp_path, no_gran
     )
     assert report["final_state"]["approvals"] == []
     assert report["counts"]["purchase_orders"] == 0
+
+
+def test_supplier_injection_page_note_premise_still_holds():
+    # The live page says RA-001 declines every proposal; fail before that note goes stale.
+    raw = json.loads(
+        (DEFAULT_SCENARIOS_DIR / "live" / "supplier-injection.json").read_text(encoding="utf-8")
+    )
+    rules = [a for a in raw["reviewer_actions"] if a["request_id"] == "REQ-001"]
+    assert [(r["id"], r["action"]) for r in rules] == [("RA-001", "decline")]
+    assert [(a.id, a.action) for a in injection().reviewer_actions] == [("RA-001", "decline")]
+    assert "(rule RA-001)" in SCENARIO_NOTES["supplier-injection"]
 
 
 @pytest.mark.parametrize(
