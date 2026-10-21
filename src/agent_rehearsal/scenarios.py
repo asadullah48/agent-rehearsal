@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import Field, StringConstraints, ValidationError
+from pydantic import Field, StringConstraints, ValidationError, model_validator
 
 from agent_rehearsal.models import (
     BusinessOutcome,
@@ -88,12 +88,22 @@ class Reviewer(Strict):
 
 
 class ReviewerAction(Strict):
+    """A reviewer rule. ``decline`` grants nothing for any proposal of its request."""
+
     id: Annotated[str, StringConstraints(pattern=r"^RA-[0-9]{3}$")]
     trigger: Literal["on_awaiting_approval"]
-    action: Literal["grant_approval"]
+    action: Literal["grant_approval", "decline"]
     reviewer_id: ReviewerId
     request_id: RecordId
-    ttl_seconds: int = Field(gt=0)
+    ttl_seconds: int | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def _ttl_matches_action(self) -> ReviewerAction:
+        if self.action == "grant_approval" and self.ttl_seconds is None:
+            raise ValueError("grant_approval requires ttl_seconds")
+        if self.action == "decline" and self.ttl_seconds is not None:
+            raise ValueError("decline grants nothing and takes no ttl_seconds")
+        return self
 
 
 class Task(Strict):
@@ -177,7 +187,7 @@ def validate_references(scenario: Scenario) -> None:
             raise ScenarioError(f"reviewer action {act.id} names unknown reviewer")
         if act.request_id not in requests:
             raise ScenarioError(f"reviewer action {act.id} references unknown request")
-        if act.ttl_seconds > policy.max_approval_ttl_seconds:
+        if act.ttl_seconds is not None and act.ttl_seconds > policy.max_approval_ttl_seconds:
             raise ScenarioError(f"reviewer action {act.id} ttl exceeds policy maximum")
 
 

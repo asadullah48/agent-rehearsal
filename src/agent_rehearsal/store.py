@@ -26,6 +26,10 @@ if TYPE_CHECKING:
 
 SCHEMA = """
 CREATE TABLE run_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE model_decisions (
+    step INTEGER PRIMARY KEY,
+    record_json TEXT NOT NULL
+);
 CREATE TABLE decision_journal (
     step INTEGER PRIMARY KEY,
     decision_json TEXT NOT NULL,
