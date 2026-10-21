@@ -9,7 +9,7 @@ fictional procurement workflow.
 > **scripted offline decision replay**. Both make **zero model calls**. Nothing
 > in those runs demonstrates the behavior of a live LLM agent.
 > The optional `LiveModelController` proposes actions through the same gateway.
-> No live evaluation results are claimed until an approved run produces a report.
+> Live evaluation results from approved runs are recorded in the next section.
 > See [live evaluation and spending assumptions](docs/LIVE-EVALUATION.md).
 >
 > Synthetic data only. Evidence is **tamper-evident (not tamper-proof)**;
@@ -316,7 +316,7 @@ connections and `.env` reads. No runtime or development dependencies were added.
   relative to a separately retained digest. A local anchor and manifest are writable
   by the same file owner. `verify` checks only the exported ledger. Bundle export
   publishes whole directory generations; interrupted exports can be resumed.
-- Live-only scenarios are detected by folder path (scenarios/live), not by a flag in the scenario file.
+- **Live-only detection:** Live-only scenarios are detected by folder path (scenarios/live), not by a flag in the scenario file.
 - **English only.** Arabic is planned, not supported. It will come only after a
   competent reviewer verifies content and behaviour.
 - **No real purchasing, payments, legal interpretation, or government system

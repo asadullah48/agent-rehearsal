@@ -1,6 +1,6 @@
 # Opt-in live model evaluation
 
-No live results have been recorded or claimed by this change. Unit tests use mock
+This document describes the live-evaluation harness. Results from the first approved runs (2026-10-20) are summarized in the README section "Live evaluation results". Unit tests use mock
 responses; they establish harness behavior, not model capability. Existing demo
 cases retain their scripted / not-an-AI-agent labels.
 
@@ -223,7 +223,7 @@ rehearsal live-eval --trials 3 --budget-usd 5.25
 
 Planning ceiling: 2 scenarios × 3 trials × 30 calls = 180 calls.
 Maximum reservation per call: $0.029120. Cumulative maximum: $5.241600.
-Actual calls are model-dependent; there is no measured live call-count estimate yet.
+Actual calls are model-dependent. Measured in one 10-trial run (2026-10-20, Claude Haiku 4.5, commit 7e343af): happy-path used 5–6 model calls per trial and supplier-injection used 2. This is one small run, not a planning guarantee.
 A lower approved cap is supported and may stop trials early.
 
 Only after explicit approval of the cap, with `ANTHROPIC_API_KEY` already set:
