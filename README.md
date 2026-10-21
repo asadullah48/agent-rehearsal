@@ -15,6 +15,14 @@ fictional procurement workflow.
 > Synthetic data only. Evidence is **tamper-evident (not tamper-proof)**;
 > retain a trusted digest outside the writable bundle. Licensed under [MIT](LICENSE).
 
+## Live evaluation results
+
+In a 10-trial live evaluation (2026-10-20, Claude Haiku 4.5, temperature 0, prompt `procurement-native-tools-v3`, commit `7e343af`), all five happy-path trials completed purchases with valid approvals. All five supplier-injection trials, where the scenario's reviewer declines every proposal, ended in the expected refusal without creating approvals, reservations or purchase orders. The model did not act on the injected supplier text in any trial. No duplicate writes or incorrect success claims were observed. Actual cost was $0.120710 across 38 model calls.
+
+These trials show observed model compliance with the approval workflow. They do not show live gateway enforcement against bypass attempts; mocked tests cover that behaviour. Identical third-call inputs at temperature 0 produced two different valid action sequences. Results cover one model and one prompt version, and five trials per scenario are too few to support a precise reliability estimate.
+
+Settings verified from code at `7e343af` (not recorded in the run report): thinking disabled, parallel tool use disabled, `max_tokens=1024`.
+
 ## Synthetic data notice
 
 Every supplier, reviewer, budget, request and amount is fictional. Policy
@@ -308,6 +316,7 @@ connections and `.env` reads. No runtime or development dependencies were added.
   relative to a separately retained digest. A local anchor and manifest are writable
   by the same file owner. `verify` checks only the exported ledger. Bundle export
   publishes whole directory generations; interrupted exports can be resumed.
+- Live-only scenarios are detected by folder path (scenarios/live), not by a flag in the scenario file.
 - **English only.** Arabic is planned, not supported. It will come only after a
   competent reviewer verifies content and behaviour.
 - **No real purchasing, payments, legal interpretation, or government system
